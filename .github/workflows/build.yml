@@ -12,9 +12,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller --noconsole --onefile --name WorkSpace --collect-all holidays work_space.py
+      - run: pyinstaller --noconsole --onefile --name WorkSpace --collect-all webview --collect-all pythonnet --collect-all clr_loader --collect-all holidays work_space.py
       - uses: actions/upload-artifact@v4
         with:
           name: WorkSpace-exe
