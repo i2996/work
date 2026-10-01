@@ -27,6 +27,30 @@ def app_dir():
 DATA_PATH = os.path.join(app_dir(), "workspace_data.json")
 
 
+MINI_TITLE = APP_TITLE + " MINI"
+
+
+def native_topmost(title, on):
+    """윈도우 API로 '항상 위'를 켜고 끔. 성공하면 True."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.SetWindowPos.restype = wintypes.BOOL
+        hwnd = user32.FindWindowW(None, title)
+        if not hwnd:
+            return False
+        HWND_TOPMOST, HWND_NOTOPMOST = wintypes.HWND(-1), wintypes.HWND(-2)
+        flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+        return bool(user32.SetWindowPos(hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST, 0, 0, 0, 0, flags))
+    except Exception:
+        return False
+
+
 def holiday_map():
     """한국 공휴일(대체공휴일 포함) {YYYY-MM-DD: 이름}. 라이브러리가 없으면 빈 값(화면에서 고정 공휴일만 사용)."""
     out = {}
@@ -249,29 +273,67 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .hint2{font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6}
 
 /* ── 미니창 ── */
-.mini-app{height:100%;display:flex;flex-direction:column;gap:10px;padding:12px}
+.mini-app{height:100%;display:flex;flex-direction:column;gap:8px;padding:10px;overflow:hidden}
 .mini-top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
 .brand.sm{font-size:16px}
 .pinbtn{padding:5px 11px;font-size:12px;font-weight:600;color:var(--muted);border-radius:999px;background:#fff}
 .pinbtn.on{background:var(--accent-soft);color:var(--accent-ink);border-color:#cfd9f6}
-.mini-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:12px 12px 10px}
-.mini-card .mt{font-size:13px;font-weight:700;margin-bottom:8px}
+.mini-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:10px 12px 8px;min-height:0}
+.mini-card .mt{font-size:13px;font-weight:700;margin-bottom:6px}
+.mini-sum{flex:none}
 .pills{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.pill{border-radius:12px;padding:8px 6px;text-align:center;background:#f6f5fb}
-.pill b{display:block;font-size:20px;line-height:1.2}
+.pill{border-radius:12px;padding:6px 6px;text-align:center;background:#f6f5fb}
+.pill b{display:block;font-size:18px;line-height:1.2}
 .pill span{font-size:11px;color:var(--muted)}
 .pill.p-pink{background:var(--pink-soft)}.pill.p-pink b{color:var(--pink-ink)}
 .pill.p-blue{background:var(--accent-soft)}.pill.p-blue b{color:var(--accent-ink)}
-.mini-tasks{flex:none;max-height:36%;display:flex;flex-direction:column;min-height:90px}
-.mini-tasks .body{overflow-y:auto}
+.mini-tasks{flex:1 1 0;min-height:92px;display:flex;flex-direction:column}
+.mini-tasks .body{flex:1;min-height:0;overflow-y:auto}
+.mt-add{flex:none;display:flex;gap:6px;margin-bottom:6px}
+.mt-add input{flex:1;min-width:0;padding:7px 10px;font-size:13px}
+.mt-add .btn{padding:6px 12px;white-space:nowrap}
 .mt-row{display:flex;align-items:center;gap:8px;padding:8px 8px;border-radius:11px;margin-bottom:4px;background:#f8f8fc;font-size:13px}
 .mt-row .t{flex:1;min-width:0;font-weight:600;line-height:1.35;word-break:break-all}
 .mt-row .t small{display:block;font-weight:500;color:var(--muted);font-size:11px}
 .mt-row.pink{background:var(--pink-soft);box-shadow:inset 3px 0 0 var(--pink)}
 .mt-row.pink .t{color:var(--pink-ink)}
 .mt-row .action{padding:5px 11px;flex:none}
-.mini-todo{flex:1;min-height:0;padding:0;display:flex;overflow:hidden}
-.mini-todo .side-todo{padding:12px 6px 8px 12px;width:100%}
+.mini-todo{flex:1.5 1 0;min-height:90px;padding:0;display:flex;overflow:hidden}
+.mini-todo .side-todo{padding:10px 6px 8px 12px;width:100%;min-height:0}
+.mini-memo{flex:none;background:#fff8e1;border-color:#f3e6b8}
+.mini-memo .mt{color:#9a8230;margin-bottom:4px}
+.mini-memo textarea{display:block;width:100%;height:64px;resize:none;border:0;background:transparent;padding:2px 0;line-height:1.55;color:#6b5f3a;box-shadow:none}
+
+/* TO-DO 연필 / 체크리스트 */
+.tr .pen{display:grid;place-items:center}
+.tr .pen:hover{background:var(--accent-soft);color:var(--accent-ink)}
+.tr.editing{padding:5px 0}
+.tr.editing .tedit{flex:1;min-width:0;padding:6px 8px;font-size:13px}
+.grp-t.cl{color:var(--lav-ink)}
+.cl-grp{background:#f8f6fd;border:1px solid #ece6f8;border-radius:12px;padding:8px 10px 2px;margin-bottom:8px}
+.cl-h{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:2px}
+.cl-h b{color:var(--lav-ink);word-break:break-all}
+.cl-h span{color:var(--muted);white-space:nowrap}
+.cl-grp .tr:last-child{border-bottom:0}
+.tag.sub{background:#eef0f8;color:#6a74a8}
+.subrow{display:flex;gap:6px;margin-bottom:2px}
+.subrow input{flex:1}
+.subrow .x{width:36px;color:#b9b7c9}
+.addsub{justify-self:start;font-size:12px;padding:6px 12px}
+
+/* 통계: 정기/일반 */
+.seg.segline{display:inline-flex;align-self:flex-start;margin-bottom:14px}
+.seg.segline button{padding:7px 20px;flex:none}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.cmpbox{border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+.cmpt{font-weight:700;display:flex;align-items:center;gap:8px}
+.cmpt i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.cmpn{font-size:30px;font-weight:700;margin:6px 0 2px}
+.cmpn small{font-size:14px;color:var(--muted);margin-left:3px;font-weight:600}
+.cmps{font-size:12px;color:var(--muted)}
+.cmpbar{height:10px;background:#f1f0f7;border-radius:999px;overflow:hidden;margin:12px 0 6px}
+.cmpbar div{height:100%;border-radius:999px}
+.cmpr{font-size:12px;color:var(--muted);text-align:right}
 
 /* 근무일지 */
 .logbox{flex:1;min-height:260px;width:100%;resize:none;padding:18px 20px;border-radius:14px;background:#fbfbfe;line-height:1.95;font-size:14px;cursor:text}
@@ -434,6 +496,25 @@ const WSLogic = (function () {
   function removeTask(id) {
     ctx.S.tasks = ctx.S.tasks.filter(t => t.id !== id);
     for (const k of Object.keys(ctx.S.prog)) if (k === 't' + id || k.startsWith('t' + id + '@')) delete ctx.S.prog[k];
+    for (const k of Object.keys(ctx.S.subdone || {})) if (k.startsWith('t' + id + ':') || k.startsWith('t' + id + '@')) delete ctx.S.subdone[k];
+  }
+
+  /* 세부 업무 체크리스트 (메인 업무의 발생(occurrence)마다 체크 상태를 따로 가짐) */
+  const subsOf = o => (o.task && o.task.subs) || [];
+  const subDone = (key, sid) => !!(ctx.S.subdone || {})[key + ':' + sid];
+  function toggleSub(key, sid) {
+    ctx.S.subdone = ctx.S.subdone || {};
+    const k = key + ':' + sid;
+    if (ctx.S.subdone[k]) delete ctx.S.subdone[k]; else ctx.S.subdone[k] = 1;
+  }
+  function subCount(o) {
+    const subs = subsOf(o);
+    return { total: subs.length, done: subs.filter(x => subDone(o.key, x.id)).length };
+  }
+  /* 오늘 기간 안에 있고 아직 완료되지 않은 메인 업무 중 체크리스트가 있는 것 (지연 개념 없음) */
+  function activeChecklists() {
+    const t = today();
+    return occRange(t, t, { noTodos: true }).filter(o => subsOf(o).length && stOf(o.key) !== 'done').sort(byEnd);
   }
 
   function describeTask(t) {
@@ -452,6 +533,7 @@ const WSLogic = (function () {
     s.todos = s.todos || [];
     s.tasks = s.tasks || [];
     s.prog = s.prog || {};
+    s.subdone = s.subdone || {};
     s.extra_off = s.extra_off || [];
     s.next_id = s.next_id || 1;
     if (s.rules) {
@@ -473,7 +555,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, describeTask, migrate, setState };
+    removeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -490,7 +572,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'prog', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', editTodo: null, miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -516,6 +598,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     while (s <= last) { weeks.push(Array.from({ length: 7 }, (_, i) => addDays(s, i))); s = addDays(s, 7); }
     return weeks;
   }
+  const subTag = o => { const c = L.subCount(o); return c.total ? '<span class="tag sub" title="세부 업무 체크리스트">☑ ' + c.done + '/' + c.total + '</span>' : ''; };
   const periodText = o => (iso(o.start) === iso(o.end) ? fmtMD(o.end) : fmtMD(o.start) + ' ~ ' + fmtMD(o.end));
   function dueCell(o) {
     let h = fmtMD(o.end);
@@ -587,18 +670,23 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function openTask(task, preset) {
     const isNew = !task;
     const t = task ? JSON.parse(JSON.stringify(task)) :
-      { id: 0, title: '', type: 'once', a: 25, b: 28, start: preset || '', end: preset || '', time: '', adjust: true };
+      { id: 0, title: '', type: 'once', a: 25, b: 28, start: preset || '', end: preset || '', time: '', adjust: true, subs: [] };
+    t.subs = t.subs || [];
     const TYPES = [['once', '이번만'], ['monthly', '매월 N일'], ['eom', '월말 기준'], ['period', '매월 기간']];
     const M = openModal(() => '<h3>' + (isNew ? '업무 등록' : '업무 수정') + '</h3><div class="form">' +
       '<label>업무명</label><input id="fTitle" value="' + esc(t.title) + '" placeholder="예: 월말 자료 정리">' +
       '<label>반복 방식</label><div class="seg" id="fType"></div><div id="fFields"></div>' +
-      '<label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '"></div>' +
+      '<label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '">' +
+      '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
+      '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
+      '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.</div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button>' +
       '<button class="btn primary" data-act="fSave">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
     const read = () => {
       if (g('fTitle')) t.title = g('fTitle').value.trim();
       if (g('fTime')) t.time = g('fTime').value;
+      M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) { t.start = g('fStart').value; t.end = g('fEnd').value; t.adjust = g('fAdj').checked; }
       if (g('fA')) { const v = parseInt(g('fA').value, 10); if (!isNaN(v)) t.a = v; }
       if (g('fB')) { const v = parseInt(g('fB').value, 10); if (!isNaN(v)) t.b = v; }
@@ -624,8 +712,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       }
       g('fFields').innerHTML = h;
     };
-    form = { t, isNew, read, paint, g };
-    paint();
+    const paintSubs = () => {
+      g('fSubs').innerHTML = t.subs.map((x, i) => '<div class="subrow"><input class="sub-in" data-i="' + i + '" value="' + esc(x.text) + '" placeholder="세부 업무 내용">' +
+        '<button type="button" class="x" data-act="subDel" data-i="' + i + '" title="삭제">✕</button></div>').join('');
+    };
+    form = { t, isNew, read, paint, paintSubs, g, el: M.el };
+    paint(); paintSubs();
     setTimeout(() => { const i = g('fTitle'); if (i) i.focus(); }, 0);
   }
 
@@ -671,6 +763,25 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     tab(el) {
       ui.tab = el.dataset.tab; renderTabs(); renderPanel();
       if (ui.tab === 'log') focusLog();
+    },
+    subToggle(el) { L.toggleSub(el.dataset.key, el.dataset.sid); commit(); },
+    tdEdit(el) {
+      ui.editTodo = Number(el.dataset.id); renderTodos();
+      setTimeout(() => { const i = $('.tedit'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0);
+    },
+    tdEditOk() { saveTodoEdit($('.tedit')); },
+    subAdd() {
+      form.read(); form.t.subs = form.t.subs || []; form.t.subs.push({ id: S.next_id++, text: '' }); form.paintSubs();
+      const ins = form.el.querySelectorAll('.sub-in'); if (ins.length) ins[ins.length - 1].focus();
+    },
+    subDel(el) { form.read(); form.t.subs.splice(Number(el.dataset.i), 1); form.paintSubs(); },
+    statKind(el) { ui.statKind = el.dataset.v; renderPanel(); },
+    miniTaskAdd() {
+      const i = $('#miniTaskIn'), v = i.value.trim(); if (!v) return;
+      const id = S.next_id++, ts = iso(today());
+      S.tasks.push({ id, title: v, type: 'once', a: 0, b: 0, time: '', start: ts, end: ts, adjust: false, subs: [] });
+      S.prog['t' + id] = { s: 'doing', at: ts };
+      i.value = ''; commit();
     },
     logPrev() { ui.logDate = iso(addDays(P(ui.logDate || iso(today())), -1)); renderPanel(); focusLog(); },
     logNext() { const n = iso(addDays(P(ui.logDate || iso(today())), 1)); ui.logDate = n >= iso(today()) ? '' : n; renderPanel(); focusLog(); },
@@ -733,6 +844,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if ((t.type === 'monthly' || t.type === 'period') && !(t.a >= 1 && t.a <= 31)) return err('날짜는 1~31 사이로 입력해 주세요.');
       if (t.type === 'period' && !(t.b >= 1 && t.b <= 31)) return err('종료일은 1~31 사이로 입력해 주세요.');
       if (t.type === 'eom' && !(t.a >= 0 && t.a <= 20)) return err('0~20 사이로 입력해 주세요.');
+      t.subs = (t.subs || []).filter(x => x.text.trim()).map(x => ({ id: x.id, text: x.text.trim() }));
       if (isNew) { t.id = S.next_id++; S.tasks.push(t); }
       else { const i = S.tasks.findIndex(x => x.id === t.id); if (i >= 0) S.tasks[i] = t; }
       closeModal(); commit();
@@ -755,6 +867,17 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
   };
   function curDayDate() { const b = $('[data-act="newTask"]'); return b ? b.dataset.date : iso(today()); }
+  document.addEventListener('keydown', e => {
+    const c = e.target.classList;
+    if (!c) return;
+    if (c.contains('tedit')) {
+      if (e.key === 'Enter') { e.preventDefault(); saveTodoEdit(e.target); }
+      else if (e.key === 'Escape') { e.stopPropagation(); saveTodoEdit(e.target, true); }
+    } else if (c.contains('sub-in') && e.key === 'Enter') { e.preventDefault(); acts.subAdd(); }
+  }, true);
+  document.addEventListener('focusout', e => {
+    if (e.target.classList && e.target.classList.contains('tedit') && ui.editTodo != null) saveTodoEdit(e.target);
+  });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     if (!el) return;
@@ -790,11 +913,22 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return '<div class="side-title">3일 업무 TO-DO</div><div class="todo-scroll">' +
       '<div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div>' +
       '<div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div>' +
+      '<div id="clWrap"><div class="grp-t cl">업무 체크리스트</div><div id="tdCl"></div></div>' +
       '<div class="grp-t" id="tdTomT"></div><div class="quick"><input id="tdTomIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="tomorrow">＋</button></div><div id="tdTom"></div></div>';
   }
+  const PENCIL = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  function saveTodoEdit(input, cancel) {
+    const id = ui.editTodo; if (id == null) return;
+    ui.editTodo = null;
+    const v = input ? input.value.trim() : '';
+    const t = S.todos.find(x => x.id === id);
+    if (!cancel && t && v && v !== t.text) { t.text = v; commit(); } else renderTodos();
+  }
   function todoRow(t, late) {
+    if (ui.editTodo === t.id) return '<div class="tr editing"><input class="tedit" value="' + esc(t.text) + '"><button class="x pen" data-act="tdEditOk" title="저장">✓</button></div>';
     return '<div class="tr ' + (t.done ? 'done' : '') + (late ? ' late' : '') + '"><button class="chk ' + (t.done ? 'on' : '') + '" data-act="tdToggle" data-id="' + t.id + '">' + (t.done ? '✓' : '') + '</button>' +
-      '<span class="tx">' + esc(t.text) + '</span><button class="x mv" data-act="tdPush" data-id="' + t.id + '" title="다음 날로 미루기">›</button>' +
+      '<span class="tx">' + esc(t.text) + '</span><button class="x pen" data-act="tdEdit" data-id="' + t.id + '" title="수정">' + PENCIL + '</button>' +
+      '<button class="x mv" data-act="tdPush" data-id="' + t.id + '" title="다음 날로 미루기">›</button>' +
       '<button class="x" data-act="tdDel" data-id="' + t.id + '" title="삭제">✕</button></div>';
   }
   function renderTodos() {
@@ -808,6 +942,16 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     fill('tdToday', S.todos.filter(x => x.date === ts), false);
     fill('tdTom', S.todos.filter(x => x.date === tm), false);
     $('#tdPastWrap').classList.toggle('hidden', !past.length);
+    const cls = L.activeChecklists();
+    $('#clWrap').classList.toggle('hidden', !cls.length);
+    $('#tdCl').innerHTML = cls.map(o => {
+      const c = L.subCount(o);
+      return '<div class="cl-grp"><div class="cl-h"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
+        (iso(o.start) !== iso(o.end) ? ' · ~' + fmtMD(o.end) : '') + '</span></div>' +
+        L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
+          return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
+            '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div>';
+    }).join('');
     $('#tdTodayT').textContent = '오늘 (' + pad2(t.getMonth() + 1) + '/' + pad2(t.getDate()) + ')';
     const n = addDays(t, 1);
     $('#tdTomT').textContent = '내일 (' + pad2(n.getMonth() + 1) + '/' + pad2(n.getDate()) + ')';
@@ -836,7 +980,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!list.length) return h + '<div class="empty"><div><b>진행 중인 업무가 없어요</b>전체 조회에서 \'진행\' 버튼을 누르면 여기에 나타나요</div></div>';
     h += '<div class="table"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>';
     for (const o of list) {
-      h += '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : '') + '"><div class="c-t">' + esc(o.title) + '</div><div class="c-p">' + periodText(o) +
+      h += '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
         '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a"><button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
         '<button class="undo" data-act="reset" data-key="' + o.key + '" title="시작을 취소하고 시작 전으로 되돌려요">취소</button></div></div>';
     }
@@ -856,7 +1000,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     h += '<div class="table"><div class="rw head all"><div>업무</div><div>기간</div><div>마감</div><div style="text-align:right">상태</div></div>';
     for (const o of list) {
       const st = stOf(o.key);
-      h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + '</div><div class="c-p">' + periodText(o) +
+      h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
         '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + stateCell(o) + '</div></div>';
     }
     return h + '</div>';
@@ -904,8 +1048,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (p.s === 'done' && p.done_at === ds) { const o = L.occByKey(k); if (o) items.push(o); }
     }
     items.sort(L.byEnd);
-    const todos = S.todos.filter(x => x.done && x.date === ds).sort((a, b) => a.id - b.id);
-    const lines = items.map(o => o.title).concat(todos.map(x => x.text));
+    const lines = items.map(o => o.title);
     return { text: lines.join('\n'), count: lines.length };
   }
   function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) { ta.focus(); ta.select(); } }, 0); }
@@ -923,21 +1066,33 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* 통계 */
   function viewStats() {
     const y = ui.statY, m = ui.statM, t = today();
-    const list = L.occRange(D(y, m, 1), D(y, m, mlen(y, m)), { noTodos: true });
-    let late = 0, run = 0, done = 0, plan = 0;
-    for (const o of list) {
-      const st = stOf(o.key);
-      if (st === 'done') done++;
-      else { if (o.end < t) late++; if (st === 'doing') run++; else plan++; }
-    }
-    const total = list.length, max = Math.max(total, 1), rate = total ? Math.round(done / total * 100) : 0;
+    const all = L.occRange(D(y, m, 1), D(y, m, mlen(y, m)), { noTodos: true });
+    const kindOf = o => (o.task.type === 'once' ? 'once' : 'rule');   // 정기 업무 = 매월 반복, 일반 업무 = 이번만
+    const calc = list => {
+      let late = 0, run = 0, done = 0, plan = 0;
+      for (const o of list) {
+        const st = stOf(o.key);
+        if (st === 'done') done++;
+        else { if (o.end < t) late++; if (st === 'doing') run++; else plan++; }
+      }
+      return { total: list.length, late, run, done, plan, rate: list.length ? Math.round(done / list.length * 100) : 0 };
+    };
+    const sel = ui.statKind === 'all' ? all : all.filter(o => kindOf(o) === ui.statKind);
+    const c = calc(sel), r = calc(all.filter(o => kindOf(o) === 'rule')), g = calc(all.filter(o => kindOf(o) === 'once'));
+    const max = Math.max(c.total, 1);
     const card = (label, num, color) => '<div class="stat"><div class="label"><i style="background:' + color + '"></i>' + label + '</div><div class="num" style="color:' + color + '">' + num + '</div></div>';
     const bar = (label, n, color) => '<div class="brow"><div class="bl">' + label + '</div><div class="bt"><div class="bf" style="width:' + Math.round(n / max * 100) + '%;background:' + color + '"></div></div><b>' + n + '</b></div>';
-    return '<div class="sec-head"><div><h2>통계</h2><div class="sub">' + y + '년 ' + m + '월 업무 달력 기준</div></div>' +
+    const cmp = (name, d, color) => '<div class="cmpbox"><div class="cmpt"><i style="background:' + color + '"></i>' + name + '</div>' +
+      '<div class="cmpn">' + d.total + '<small>건</small></div><div class="cmps">완료 ' + d.done + ' · 진행 ' + d.run + ' · 지연 ' + d.late + ' · 시작 전 ' + d.plan + '</div>' +
+      '<div class="cmpbar"><div style="width:' + d.rate + '%;background:' + color + '"></div></div><div class="cmpr">완료율 ' + d.rate + '%</div></div>';
+    const kinds = [['all', '전체'], ['rule', '정기 업무'], ['once', '일반 업무']];
+    return '<div class="sec-head"><div><h2>통계</h2><div class="sub">' + y + '년 ' + m + '월 업무 달력 기준 · 정기 업무 = 매월 반복, 일반 업무 = 이번만 하는 업무</div></div>' +
       '<div class="nav"><button data-act="statPrev">‹</button><span class="lbl">' + y + '.' + pad2(m) + '</span><button data-act="statNext">›</button><button data-act="statToday">이번 달</button></div></div>' +
-      '<div class="stats">' + card('전체 업무', total, '#6f7fb8') + card('지연', late, '#d9548f') + card('진행', run, '#6c88d6') + card('완료', done, '#5fa384') + card('시작 전', plan, '#c9a23d') + '</div>' +
-      '<div class="chartbox"><div class="ct"><strong>업무 상태 비율</strong><span class="rate">완료율 ' + rate + '%</span></div>' +
-      bar('지연', late, '#f09bc0') + bar('진행', run, '#9db2ec') + bar('완료', done, '#a9d4bd') + bar('시작 전', plan, '#ecd48f') + '</div>';
+      '<div class="seg segline">' + kinds.map(([v, n]) => '<button type="button" class="' + (ui.statKind === v ? 'on' : '') + '" data-act="statKind" data-v="' + v + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="stats">' + card('전체 업무', c.total, '#6f7fb8') + card('지연', c.late, '#d9548f') + card('진행', c.run, '#6c88d6') + card('완료', c.done, '#5fa384') + card('시작 전', c.plan, '#c9a23d') + '</div>' +
+      '<div class="chartbox"><div class="ct"><strong>업무 상태 비율</strong><span class="rate">완료율 ' + c.rate + '%</span></div>' +
+      bar('지연', c.late, '#f09bc0') + bar('진행', c.run, '#9db2ec') + bar('완료', c.done, '#a9d4bd') + bar('시작 전', c.plan, '#ecd48f') + '</div>' +
+      '<div class="cmp">' + cmp('정기 업무', r, '#8fa3e0') + cmp('일반 업무', g, '#c9a23d') + '</div>';
   }
 
   /* ── 미니창 ── */
@@ -982,10 +1137,15 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     } else {
       root.innerHTML = '<div class="mini-app"><div class="mini-top"><div class="brand sm">▣ WORK SPACE<span>MINI</span></div>' +
         '<button class="pinbtn on" data-act="pin">항상 위</button></div>' +
-        '<section class="mini-card"><div class="mt">오늘 현황</div><div id="miniSummary"></div></section>' +
-        '<section class="mini-card mini-tasks"><div class="mt">업무</div><div class="body" id="miniTasks"></div></section>' +
-        '<section class="mini-card mini-todo"><div class="side-todo">' + todoCard() + '</div></section></div>';
+        '<section class="mini-card mini-sum"><div class="mt">오늘 현황</div><div id="miniSummary"></div></section>' +
+        '<section class="mini-card mini-tasks"><div class="mt">업무</div>' +
+        '<div class="mt-add"><input id="miniTaskIn" placeholder="새 업무 입력 후 Enter"><button class="btn primary" data-act="miniTaskAdd">＋ 추가</button></div>' +
+        '<div class="body" id="miniTasks"></div></section>' +
+        '<section class="mini-card mini-todo"><div class="side-todo">' + todoCard() + '</div></section>' +
+        '<section class="mini-card mini-memo"><div class="mt">업무 참고 메모</div><textarea id="memo" spellcheck="false" placeholder="자주 보는 내용이나 기억할 것"></textarea></section></div>';
     }
+    const mi = document.getElementById('miniTaskIn');
+    if (mi) mi.addEventListener('keydown', e => { if (e.key === 'Enter') acts.miniTaskAdd(); });
     ['tdTodayIn', 'tdTomIn'].forEach(id => {
       const i = document.getElementById(id);
       if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') acts.addTodo({ dataset: { k: id === 'tdTodayIn' ? 'today' : 'tomorrow' } }); });
@@ -1087,14 +1247,34 @@ class Core:
                 pass
 
     def show_mini(self, show):
+        """미니창 보이기/숨기기. 화면(JS) 호출을 막지 않도록 별도 스레드에서 처리."""
+        self.mini_visible = show
         w = self.windows.get("mini")
         if not w:
             return
-        try:
-            w.show() if show else w.hide()
-            self.mini_visible = show
-        except Exception:
-            pass
+
+        def run():
+            try:
+                w.show() if show else w.hide()
+            except Exception:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_topmost(self, on):
+        """항상 위 켜기/끄기. (창 속성을 JS 호출 스레드에서 직접 바꾸면 응답 없음이 생길 수 있어 별도 스레드에서 처리)"""
+        w = self.windows.get("mini")
+
+        def run():
+            if native_topmost(MINI_TITLE, on):
+                return
+            try:
+                if w:
+                    w.on_top = bool(on)
+            except Exception:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
 
 
 class Api:
@@ -1116,12 +1296,7 @@ class Api:
         return True
 
     def set_topmost(self, on):
-        w = self._core.windows.get("mini")
-        if w:
-            try:
-                w.on_top = bool(on)
-            except Exception:
-                pass
+        self._core.set_topmost(bool(on))
         return True
 
 
@@ -1134,8 +1309,8 @@ def main():
     core = Core()
     main_w = webview.create_window(APP_TITLE, html=page("main"), js_api=Api(core), width=1320, height=860,
                                    min_size=(1100, 720), background_color="#f2f1f6")
-    mini_w = webview.create_window(APP_TITLE + " MINI", html=page("mini"), js_api=Api(core), width=360, height=740,
-                                   min_size=(320, 520), on_top=True, background_color="#f2f1f6")
+    mini_w = webview.create_window(MINI_TITLE, html=page("mini"), js_api=Api(core), width=360, height=780,
+                                   min_size=(320, 480), on_top=True, background_color="#f2f1f6")
     core.windows = {"main": main_w, "mini": mini_w}
 
     def on_main_closing():
