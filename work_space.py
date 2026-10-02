@@ -163,7 +163,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .sec-head h2{margin:0;font-size:19px}
 .sub{color:var(--muted);font-size:12px;margin-top:2px}
 .nav{display:flex;align-items:center;gap:6px}
-.nav .lbl{min-width:104px;text-align:center;font-weight:700}
+.nav{flex-wrap:wrap;justify-content:flex-end}
+.nav .lbl{min-width:104px;text-align:center;font-weight:700;white-space:nowrap}
+.nav .lblw{min-width:150px}
 .nav button{height:32px;min-width:32px;padding:0 10px;font-weight:600;background:#fff}
 .nav button:hover{background:var(--accent-soft)}
 
@@ -171,8 +173,8 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .table{border:1px solid var(--line);border-radius:14px;overflow:hidden;flex:none}
 .rw{display:grid;align-items:center;gap:12px;padding:0 16px;min-height:52px;border-bottom:1px solid var(--line2)}
 .rw:last-child{border-bottom:0}
-.rw.prog{grid-template-columns:minmax(0,1fr) 160px 200px 170px}
-.rw.all{grid-template-columns:minmax(0,1fr) 160px 200px 140px}
+.rw.prog{grid-template-columns:minmax(0,1fr) 150px 200px 250px}
+.rw.all{grid-template-columns:minmax(0,1fr) 150px 200px 230px}
 .rw.head{min-height:40px;background:#f6f5fa;color:#7d7b95;font-weight:600;font-size:12px}
 .rw .c-t{font-weight:600;word-break:break-all}
 .rw .c-p,.rw .c-m{color:#6f6d86;font-size:13px}
@@ -337,6 +339,58 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* 근무일지 */
 .logbox{flex:1;min-height:260px;width:100%;resize:none;padding:18px 20px;border-radius:14px;background:#fbfbfe;line-height:1.95;font-size:14px;cursor:text}
+
+/* 업무 달력: 필터 칩 / 주간 보기 */
+.chips{flex:none;display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 12px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--muted);background:#fff}
+.chip i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.chip .n{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#f1f0f7;font-size:11px;display:inline-grid;place-items:center;color:var(--muted)}
+.chip:hover{background:#f7f6fc}
+.chip.on{background:var(--accent-soft);border-color:#cfd9f6;color:var(--accent-ink)}
+.chip.on .n{background:#fff;color:var(--accent-ink)}
+.chiphint{font-size:12px;color:var(--faint);margin-left:6px}
+.seg.segsm{display:inline-flex;padding:3px}
+.seg.segsm button{flex:none;padding:5px 13px}
+.wkview{flex:1;min-height:420px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.wk-head{flex:none;display:grid;grid-template-columns:repeat(7,1fr);background:#f6f5fa;border-bottom:1px solid var(--line2)}
+.wkh{padding:8px 4px 7px;text-align:center;cursor:pointer}
+.wkh:hover{background:#efeef8}
+.wkh .wd{font-size:12px;font-weight:600;color:#7d7b95;margin-right:4px}
+.wkh .wd.red{color:#d77f9f}.wkh .wd.blue{color:#7f94c4}
+.wkh .wn{display:inline-grid;place-items:center;min-width:26px;height:26px;border-radius:999px;font-weight:700;font-size:13px;padding:0 4px}
+.wkh.today .wn{background:var(--accent);color:#fff}
+.hn2{display:block;font-size:11px;color:#d77f9f;line-height:1.2;margin-top:1px}
+.wk-scroll{flex:1;min-height:0;overflow:auto}
+.wk-inner{position:relative;min-height:100%;display:flex;flex-direction:column}
+.wk-lines{position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr);pointer-events:none}
+.wk-lines div{border-right:1px solid var(--line2)}
+.wk-lines div:last-child{border-right:0}
+.wk-span{position:relative;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:26px;row-gap:3px;padding:8px 4px 6px;border-bottom:1px dashed var(--line);pointer-events:none}
+.wk-span .bar{height:26px;line-height:26px}
+.wk-cols{position:relative;flex:1;display:grid;grid-template-columns:repeat(7,1fr);min-height:300px}
+.wkc{padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;gap:6px;align-content:flex-start}
+.wkc:hover{background:rgba(143,163,224,.06)}
+.wkc.off{background:rgba(120,110,160,.035)}
+.wkc.today{background:rgba(143,163,224,.12)}
+.wcard{border-radius:10px;padding:7px 9px;font-size:12px;font-weight:600;line-height:1.4;word-break:break-all}
+.wcard small{display:block;font-weight:500;opacity:.75;font-size:11px;margin-top:1px}
+.wcard.ready{background:#e8edf8;color:#5470a0}
+.wcard.doing{background:#b9c8f1;color:#2f4585}
+.wcard.done{background:var(--mint);color:#79a58d}
+.wcard.done .wt{text-decoration:line-through}
+.wcard.pink{background:var(--pink);color:#fff}
+.wcard.todo{background:var(--butter);color:var(--butter-ink);font-weight:500}
+
+/* 미루기 */
+.action.later{background:#fff;border-color:var(--line);color:#7d7b95}
+.action.later:hover{background:#f4f3fa;color:var(--text)}
+.mt-row .action.later{padding:5px 9px}
+.pp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 14px}
+.pp-opt{padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--accent-soft);border-color:#d3dcf6;color:var(--accent-ink);border-radius:14px}
+.pp-opt:hover{background:#d9e1f9}
+.pp-opt b{font-size:14px}.pp-opt span{font-size:12px;opacity:.85}
+.pp-quick{margin-top:4px}
+.pp-quick button{width:auto;padding:0 16px}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -517,6 +571,22 @@ const WSLogic = (function () {
     return occRange(t, t, { noTodos: true }).filter(o => subsOf(o).length && stOf(o.key) !== 'done').sort(byEnd);
   }
 
+  const nextWork = d => { let x = d; for (let i = 0; i < 40 && isOff(x); i++) x = addDays(x, 1); return x; };
+  const canPostpone = o => !!o && o.kind === 'task' && o.task.type === 'once' && stOf(o.key) !== 'done';
+  /* 일반(이번만) 업무 미루기: 하루짜리는 날짜째 이동, 기간 업무는 마감일만 늘림 */
+  function postponeTask(key, nd) {
+    const m = /^t(\d+)$/.exec(key);
+    if (!m || !nd) return false;
+    const t = ctx.S.tasks.find(x => String(x.id) === m[1]);
+    if (!t || t.type !== 'once') return false;
+    const ni = iso(nd);
+    const single = !t.start || !t.end || t.start === t.end;
+    if (single) t.start = ni;
+    t.end = ni;
+    if (isOff(nd)) t.adjust = false;   // 직접 고른 휴일 날짜는 그대로 유지
+    return true;
+  }
+
   function describeTask(t) {
     if (t.type === 'monthly') return '매월 ' + t.a + '일 (휴일이면 직전 평일)';
     if (t.type === 'eom') return parseInt(t.a, 10) === 0 ? '월말 마지막 영업일' : '월말 마지막 영업일 기준 ' + t.a + '영업일 전';
@@ -555,7 +625,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -572,7 +642,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'prog', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', editTodo: null, miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -599,6 +669,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return weeks;
   }
   const subTag = o => { const c = L.subCount(o); return c.total ? '<span class="tag sub" title="세부 업무 체크리스트">☑ ' + c.done + '/' + c.total + '</span>' : ''; };
+  const ppBtn = o => (L.canPostpone(o) ? '<button class="action later" data-act="postpone" data-key="' + o.key + '" title="마감을 뒤로 미뤄요">미루기</button>' : '');
   const periodText = o => (iso(o.start) === iso(o.end) ? fmtMD(o.end) : fmtMD(o.start) + ' ~ ' + fmtMD(o.end));
   function dueCell(o) {
     let h = fmtMD(o.end);
@@ -664,6 +735,19 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return h;
     }, true);
     setTimeout(() => { const i = $('#dayIn'); if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') acts.dayAdd(i.nextElementSibling); }); }, 0);
+  }
+
+  /* 일반 업무 미루기 */
+  function openPostpone(key) {
+    const o = L.occByKey(key);
+    if (!L.canPostpone(o)) return;
+    const base = o.end < today() ? today() : o.end;
+    const opts = [['하루 뒤', 1], ['이틀 뒤', 2], ['일주일 뒤', 7]].map(([n, k]) => [n, L.nextWork(addDays(base, k))]);
+    openModal(() => '<h3>업무 미루기</h3><p class="hint2"><b>' + esc(o.title) + '</b><br>현재 마감 ' + fmtMD(o.end) + ' · 주말·공휴일은 건너뛰어요</p>' +
+      '<div class="pp-grid">' + opts.map(([n, d]) => '<button type="button" class="pp-opt" data-act="ppApply" data-key="' + key + '" data-date="' + iso(d) + '"><b>' + n + '</b><span>' + fmtMD(d) + '</span></button>').join('') + '</div>' +
+      '<div class="form"><label>날짜 직접 선택</label></div><div class="quick pp-quick"><input id="ppDate" type="date" min="' + iso(today()) + '" value="' + iso(L.nextWork(addDays(base, 1))) + '">' +
+      '<button type="button" data-act="ppCustom" data-key="' + key + '">적용</button></div>' +
+      '<div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>');
   }
 
   /* 업무 등록 / 수정 */
@@ -760,6 +844,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   const acts = {
     toggleMini() { if (hasPy()) window.pywebview.api.toggle_mini(); },
     pin(el) { pinned = !pinned; el.classList.toggle('on', pinned); if (hasPy()) window.pywebview.api.set_topmost(pinned); },
+    postpone(el) { openPostpone(el.dataset.key); },
+    ppApply(el) { if (L.postponeTask(el.dataset.key, P(el.dataset.date))) { closeModal(); commit(); } },
+    ppCustom(el) { const v = $('#ppDate').value; if (v && L.postponeTask(el.dataset.key, P(v))) { closeModal(); commit(); } },
     tab(el) {
       ui.tab = el.dataset.tab; renderTabs(); renderPanel();
       if (ui.tab === 'log') focusLog();
@@ -798,9 +885,26 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
-    calPrev() { [ui.calY, ui.calM] = shiftMonth(ui.calY, ui.calM, -1); renderPanel(); },
-    calNext() { [ui.calY, ui.calM] = shiftMonth(ui.calY, ui.calM, 1); renderPanel(); },
-    calToday() { const t = today(); ui.calY = t.getFullYear(); ui.calM = t.getMonth() + 1; renderPanel(); },
+    calPrev() { calMove(-1); },
+    calNext() { calMove(1); },
+    calToday() { const t = today(); ui.calY = t.getFullYear(); ui.calM = t.getMonth() + 1; ui.calWeek = addDays(t, -t.getDay()); renderPanel(); },
+    calView(el) {
+      const v = el.dataset.v; if (v === ui.calView) return;
+      if (v === 'week') {
+        const t = today();
+        const base = (t.getFullYear() === ui.calY && t.getMonth() + 1 === ui.calM) ? t : D(ui.calY, ui.calM, 1);
+        ui.calWeek = addDays(base, -base.getDay());
+      }
+      ui.calView = v; renderPanel();
+    },
+    calSel(el) {
+      const k = el.dataset.k;
+      if (k === 'all') ui.calSel.clear();
+      else if (!ui.calSel.size) ui.calSel.add(k);
+      else if (ui.calSel.has(k)) ui.calSel.delete(k);
+      else ui.calSel.add(k);
+      renderPanel();
+    },
     listPrev() { [ui.listY, ui.listM] = shiftMonth(ui.listY, ui.listM, -1); renderPanel(); },
     listNext() { [ui.listY, ui.listM] = shiftMonth(ui.listY, ui.listM, 1); renderPanel(); },
     listToday() { const t = today(); ui.listY = t.getFullYear(); ui.listM = t.getMonth() + 1; renderPanel(); },
@@ -812,7 +916,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     miniToday() { const t = today(); ui.miniY = t.getFullYear(); ui.miniM = t.getMonth() + 1; renderMiniCal(); },
     miniDay(el) {
       const d = P(el.dataset.date);
-      ui.calY = d.getFullYear(); ui.calM = d.getMonth() + 1; ui.tab = 'cal';
+      ui.calY = d.getFullYear(); ui.calM = d.getMonth() + 1; ui.calWeek = addDays(d, -d.getDay()); ui.tab = 'cal';
       renderTabs(); renderPanel(); openDay(el.dataset.date);
     },
     day(el) { openDay(el.dataset.date); },
@@ -981,7 +1085,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     h += '<div class="table"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>';
     for (const o of list) {
       h += '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a"><button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
+        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + '<button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
         '<button class="undo" data-act="reset" data-key="' + o.key + '" title="시작을 취소하고 시작 전으로 되돌려요">취소</button></div></div>';
     }
     return h + '</div>';
@@ -1001,43 +1105,100 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const o of list) {
       const st = stOf(o.key);
       h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + stateCell(o) + '</div></div>';
+        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + stateCell(o) + '</div></div>';
     }
     return h + '</div>';
   }
 
-  /* 업무 달력 */
-  function viewCal() {
-    const y = ui.calY, m = ui.calM, weeks = monthWeeks(y, m), ts = iso(today());
-    const evs = L.occRange(weeks[0][0], weeks[weeks.length - 1][6]);
-    let h = '<div class="sec-head"><div><h2>업무 달력</h2><div class="legend"><span><i style="background:#e8edf8"></i>시작 전</span><span><i style="background:#b9c8f1"></i>진행</span>' +
-      '<span><i style="background:var(--mint)"></i>완료</span><span><i style="background:var(--pink)"></i>마감 당일·지연</span><span><i style="background:var(--butter)"></i>할 일</span></div></div>' +
-      '<div class="nav"><button data-act="calPrev">‹</button><span class="lbl">' + y + '년 ' + m + '월</span><button data-act="calNext">›</button><button data-act="calToday">오늘</button>' +
-      '<span style="width:8px"></span><button data-act="holidays">휴일 추가</button><button data-act="manage">업무 관리</button><button class="btn primary" data-act="addTask">＋ 업무 등록</button></div></div>' +
-      '<div class="cal-wrap"><div class="cal-wk">' + [...WD].map(c => '<div>' + c + '</div>').join('') + '</div><div class="cal-grid">';
+  /* 업무 달력 (월 / 주 보기 + 상태 필터) */
+  const CAL_KINDS = [['ready', '시작 전', '#c9d4ee'], ['doing', '진행', '#9db2ec'], ['done', '완료', '#a9d4bd'], ['pink', '마감 당일·지연', '#e2468a'], ['todo', '할 일', '#f1d77f']];
+  function calCls(e) {
+    if (e.kind === 'todo') return 'todo';
+    const st = stOf(e.key);
+    return st === 'done' ? 'done' : L.pinkOf(e) ? 'pink' : st === 'doing' ? 'doing' : 'ready';
+  }
+  const calVisible = e => !ui.calSel.size || ui.calSel.has(calCls(e));
+  function calMove(k) {
+    if (ui.calView === 'week') {
+      ui.calWeek = addDays(ui.calWeek, 7 * k);
+      const mid = addDays(ui.calWeek, 3); ui.calY = mid.getFullYear(); ui.calM = mid.getMonth() + 1;
+    } else [ui.calY, ui.calM] = shiftMonth(ui.calY, ui.calM, k);
+    renderPanel();
+  }
+  function statusText(e) {
+    if (e.kind === 'todo') return '할 일';
+    const c = calCls(e);
+    return c === 'done' ? '완료' : c === 'pink' ? (L.pinkOf(e) === 'today' ? '오늘 마감' : '지연') : c === 'doing' ? '진행' : '시작 전';
+  }
+  function laneBars(evs, ws, we) {
+    const segs = evs.filter(e => !(e.end < ws || e.start > we)).sort((a, b) => (a.start - b.start) || ((b.end - b.start) - (a.end - a.start)) || a.kind.localeCompare(b.kind));
+    const lanes = []; let bars = '';
+    for (const e of segs) {
+      const cs = Math.max(diffDays(e.start, ws), 0), ce = Math.min(diffDays(e.end, ws), 6);
+      let lane = lanes.findIndex(last => last < cs);
+      if (lane < 0) { lanes.push(ce); lane = lanes.length - 1; } else lanes[lane] = ce;
+      const cls = calCls(e);
+      bars += '<div class="bar ' + cls + (e.start < ws ? ' cl' : '') + (e.end > we ? ' cr' : '') + '" style="grid-column:' + (cs + 1) + '/' + (ce + 2) + ';grid-row:' + (lane + 1) +
+        '" title="' + esc(e.title) + '">' + (cls === 'done' ? '✓ ' : '') + esc(e.title) + '</div>';
+    }
+    return { bars, n: lanes.length };
+  }
+  function monthGrid(y, m, weeks, evs) {
+    const ts = iso(today());
+    let h = '<div class="cal-wrap"><div class="cal-wk">' + [...WD].map(c => '<div>' + c + '</div>').join('') + '</div><div class="cal-grid">';
     for (const wk of weeks) {
-      const ws = wk[0], we = wk[6];
-      const segs = evs.filter(e => !(e.end < ws || e.start > we)).sort((a, b) => (a.start - b.start) || ((b.end - b.start) - (a.end - a.start)) || a.kind.localeCompare(b.kind));
-      const lanes = []; let bars = '';
-      for (const e of segs) {
-        const cs = Math.max(diffDays(e.start, ws), 0), ce = Math.min(diffDays(e.end, ws), 6);
-        let lane = lanes.findIndex(last => last < cs);
-        if (lane < 0) { lanes.push(ce); lane = lanes.length - 1; } else lanes[lane] = ce;
-        let cls;
-        if (e.kind === 'todo') cls = 'todo';
-        else { const st = stOf(e.key); cls = st === 'done' ? 'done' : L.pinkOf(e) ? 'pink' : st === 'doing' ? 'doing' : 'ready'; }
-        bars += '<div class="bar ' + cls + (e.start < ws ? ' cl' : '') + (e.end > we ? ' cr' : '') + '" style="grid-column:' + (cs + 1) + '/' + (ce + 2) + ';grid-row:' + (lane + 1) +
-          '" title="' + esc(e.title) + '">' + (cls === 'done' ? '✓ ' : '') + esc(e.title) + '</div>';
-      }
-      h += '<div class="week" style="--n:' + lanes.length + '"><div class="cells">';
+      const lb = laneBars(evs, wk[0], wk[6]);
+      h += '<div class="week" style="--n:' + lb.n + '"><div class="cells">';
       for (const d of wk) {
         const hn = holName(d), off = d.getDay() === 0 || d.getDay() === 6 || hn;
         h += '<div class="cell' + (d.getMonth() + 1 !== m ? ' other' : '') + (off ? ' off' : '') + (iso(d) === ts ? ' today' : '') + '" data-act="day" data-date="' + iso(d) + '">' +
           '<span class="dn' + (d.getDay() === 0 || hn ? ' red' : d.getDay() === 6 ? ' blue' : '') + '">' + d.getDate() + '</span>' + (hn ? '<span class="hn">' + esc(hn) + '</span>' : '') + '</div>';
       }
-      h += '</div><div class="bars">' + bars + '</div></div>';
+      h += '</div><div class="bars">' + lb.bars + '</div></div>';
     }
     return h + '</div></div>';
+  }
+  function weekGrid(ws, evs) {
+    const we = addDays(ws, 6), ts = iso(today());
+    const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+    const multi = evs.filter(e => iso(e.start) !== iso(e.end)), single = evs.filter(e => iso(e.start) === iso(e.end));
+    const lb = laneBars(multi, ws, we);
+    let h = '<div class="wkview"><div class="wk-head">' + days.map(d => {
+      const hn = holName(d);
+      return '<div class="wkh' + (iso(d) === ts ? ' today' : '') + '" data-act="day" data-date="' + iso(d) + '"><span class="wd' + (d.getDay() === 0 || hn ? ' red' : d.getDay() === 6 ? ' blue' : '') + '">' + WD[d.getDay()] + '</span>' +
+        '<span class="wn">' + d.getDate() + '</span>' + (hn ? '<span class="hn2">' + esc(hn) + '</span>' : '') + '</div>';
+    }).join('') + '</div><div class="wk-scroll"><div class="wk-inner"><div class="wk-lines">' + '<div></div>'.repeat(7) + '</div>';
+    if (lb.n) h += '<div class="wk-span" style="--n:' + lb.n + '">' + lb.bars + '</div>';
+    h += '<div class="wk-cols">' + days.map(d => {
+      const items = single.filter(e => iso(e.start) === iso(d)).sort((a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title, 'ko'));
+      const off = d.getDay() === 0 || d.getDay() === 6 || holName(d);
+      return '<div class="wkc' + (iso(d) === ts ? ' today' : '') + (off ? ' off' : '') + '" data-act="day" data-date="' + iso(d) + '">' + items.map(e => {
+        const c = calCls(e);
+        return '<div class="wcard ' + c + '"><span class="wt">' + esc(e.title) + '</span><small>' + statusText(e) + '</small></div>';
+      }).join('') + '</div>';
+    }).join('') + '</div></div></div></div>';
+    return h;
+  }
+  function viewCal() {
+    const week = ui.calView === 'week', y = ui.calY, m = ui.calM;
+    let weeks, first, last, title;
+    if (week) {
+      first = ui.calWeek; last = addDays(first, 6);
+      title = (first.getMonth() + 1) + '월 ' + first.getDate() + '일 ~ ' + (last.getMonth() !== first.getMonth() ? (last.getMonth() + 1) + '월 ' : '') + last.getDate() + '일';
+    } else {
+      weeks = monthWeeks(y, m); first = weeks[0][0]; last = weeks[weeks.length - 1][6]; title = y + '년 ' + m + '월';
+    }
+    const all = L.occRange(first, last), counts = {};
+    CAL_KINDS.forEach(k => { counts[k[0]] = 0; });
+    all.forEach(e => { counts[calCls(e)]++; });
+    const evs = all.filter(calVisible);
+    const chips = '<div class="chips"><button class="chip ' + (ui.calSel.size ? '' : 'on') + '" data-act="calSel" data-k="all">전체</button>' +
+      CAL_KINDS.map(([k, n, c]) => '<button class="chip ' + (ui.calSel.has(k) ? 'on' : '') + '" data-act="calSel" data-k="' + k + '"><i style="background:' + c + '"></i>' + n + '<span class="n">' + counts[k] + '</span></button>').join('') +
+      '<span class="chiphint">' + (ui.calSel.size ? '선택한 상태만 보여요 · 칩을 더 눌러 함께 보기' : '상태를 누르면 그것만 따로 볼 수 있어요') + '</span></div>';
+    return '<div class="sec-head"><div><h2>업무 달력</h2></div><div class="nav"><button data-act="calPrev">‹</button><span class="lbl lblw">' + title + '</span><button data-act="calNext">›</button><button data-act="calToday">' + (week ? '이번 주' : '오늘') + '</button>' +
+      '<span class="seg segsm"><button type="button" class="' + (week ? '' : 'on') + '" data-act="calView" data-v="month">월</button><button type="button" class="' + (week ? 'on' : '') + '" data-act="calView" data-v="week">주</button></span>' +
+      '<span style="width:6px"></span><button data-act="holidays">휴일 추가</button><button data-act="manage">업무 관리</button><button class="btn primary" data-act="addTask">＋ 업무 등록</button></div></div>' +
+      chips + (week ? weekGrid(first, evs) : monthGrid(y, m, weeks, evs));
   }
 
   /* 근무일지: 그날 완료 처리한 업무 + 체크한 할 일을 자동으로 모아요 */
@@ -1110,7 +1271,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const o of list) {
       const n = diffDays(o.end, t), st = stOf(o.key), pk = L.pinkOf(o);
       const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
-      h += '<div class="mt-row ' + (pk ? 'pink' : '') + '"><div class="t">' + esc(o.title) + '<small>' + sub + '</small></div>' +
+      h += '<div class="mt-row ' + (pk ? 'pink' : '') + '"><div class="t">' + esc(o.title) + '<small>' + sub + '</small></div>' + ppBtn(o) +
         (st === 'doing' ? '<button class="action finish" data-act="finish" data-key="' + o.key + '">완료</button>'
           : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>';
     }
