@@ -5,6 +5,7 @@ WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불�
 - 메인창 : 업무 참고 메모 / 미니 달력 / 3일 TO-DO / 진행 / 전체 조회 / 업무 달력 / 통계
 - 미니창 : 오늘 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
 - 데이터 : exe(또는 .py)와 같은 폴더의 workspace_data.json 에 자동 저장
+- 자동 실행 : 설정에서 Windows 시작 시 자동 실행 ON/OFF (현재 사용자 시작프로그램 등록)
 - 업데이트 : GitHub Releases 의 새 빌드를 확인해 자동으로 교체 (설정에서 저장소 지정)
 - 화면은 Windows 내장 웹뷰(WebView2)로 그려집니다.
 """
@@ -157,6 +158,47 @@ class Updater:
 
 
 UPDATER = Updater()
+
+
+# ───────────────────────── Windows 시작 시 자동 실행 ─────────────────────────
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "WorkSpace"
+
+
+def can_autostart():
+    return os.name == "nt" and bool(getattr(sys, "frozen", False))
+
+
+def autostart_get():
+    """등록된 자동 실행 명령 (없으면 None)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            return winreg.QueryValueEx(k, RUN_NAME)[0]
+    except Exception:
+        return None
+
+
+def autostart_set(on):
+    import winreg
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        if on:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, '"%s"' % sys.executable)
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except FileNotFoundError:
+                pass
+
+
+def autostart_heal():
+    """exe 를 다른 폴더로 옮겼을 때 자동 실행 경로를 현재 위치로 갱신."""
+    try:
+        cur = autostart_get()
+        if can_autostart() and cur and cur != '"%s"' % sys.executable:
+            autostart_set(True)
+    except Exception:
+        pass
 
 
 MINI_TITLE = APP_TITLE + " MINI"
@@ -896,14 +938,16 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const M = openModal(() => '<h3>설정</h3><div class="form"><label>현재 버전</label><div class="verline">' + esc(c.version) + '</div>' +
       '<label>GitHub 저장소 (주소 끝의 아이디/저장소이름)</label><input id="cfgRepo" value="' + esc(c.repo) + '" placeholder="예: myname/workspace">' +
       '<label>접근 토큰 (비공개 저장소일 때만)</label><input id="cfgToken" type="password" autocomplete="off" placeholder="' + (c.token_set ? '저장됨 · 바꾸려면 새로 입력' : '공개 저장소면 비워 두세요') + '">' +
-      '<label class="chkline"><input id="cfgAuto" type="checkbox" ' + (c.auto ? 'checked' : '') + '>프로그램을 켤 때 새 버전을 자동으로 확인</label></div>' +
+      '<label class="chkline"><input id="cfgAuto" type="checkbox" ' + (c.auto ? 'checked' : '') + '>프로그램을 켤 때 새 버전을 자동으로 확인</label>' +
+      '<label class="chkline"><input id="cfgBoot" type="checkbox" ' + (c.autostart ? 'checked' : '') + (c.can_autostart ? '' : ' disabled') + '>Windows를 켤 때 자동으로 실행' +
+      (c.can_autostart ? '' : ' <span style="color:var(--faint)">(exe로 실행할 때만 가능)</span>') + '</label></div>' +
       '<div class="err" id="cfgMsg"></div><div class="modal-actions">' + (c.token_set ? '<button class="btn" data-act="cfgClear">토큰 지우기</button>' : '') +
       '<button class="btn" data-act="cfgCheck">지금 확인</button><button class="btn primary" data-act="cfgSave">저장</button></div>');
     form = { M, c };
   }
   const cfgSave = async clear => {
     const g = id => curModal.el.querySelector('#' + id);
-    await api().save_config(g('cfgRepo').value, g('cfgToken').value, g('cfgAuto').checked, !!clear);
+    return await api().save_config(g('cfgRepo').value, g('cfgToken').value, g('cfgAuto').checked, !!clear, g('cfgBoot').disabled ? null : g('cfgBoot').checked);
   };
   const cfgMsg = (t, bad) => { const m = $('#cfgMsg'); if (m) { m.style.color = bad ? '' : 'var(--accent-ink)'; m.innerHTML = t; } };
 
@@ -1015,7 +1059,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     toggleMini() { if (hasPy()) window.pywebview.api.toggle_mini(); },
     pin(el) { pinned = !pinned; el.classList.toggle('on', pinned); if (hasPy()) window.pywebview.api.set_topmost(pinned); },
     openSettings() { openSettings(); },
-    async cfgSave() { await cfgSave(false); cfgMsg('저장했어요.'); },
+    async cfgSave() { const r = await cfgSave(false); const e = r && r.autostart_error; cfgMsg(e ? esc(e) : '저장했어요.', !!e); },
     async cfgClear() { await cfgSave(true); closeModal(); openSettings(); },
     async cfgCheck() {
       await cfgSave(false); cfgMsg('확인 중…');
@@ -1647,9 +1691,10 @@ class Api:
         c = load_config()
         return {"repo": c.get("repo", ""), "token_set": bool(c.get("token")), "auto": bool(c.get("auto", True)),
                 "version": ("build " + APP_VERSION) if _num(APP_VERSION) is not None else "개발 버전",
-                "frozen": bool(getattr(sys, "frozen", False))}
+                "frozen": bool(getattr(sys, "frozen", False)),
+                "can_autostart": can_autostart(), "autostart": bool(autostart_get())}
 
-    def save_config(self, repo, token, auto, clear_token):
+    def save_config(self, repo, token, auto, clear_token, autostart=None):
         c = load_config()
         c["repo"] = (repo or "").strip().replace("https://github.com/", "").strip("/")
         if clear_token:
@@ -1658,7 +1703,13 @@ class Api:
             c["token"] = token.strip()
         c["auto"] = bool(auto)
         save_config(c)
-        return True
+        err = ""
+        if autostart is not None and can_autostart():
+            try:
+                autostart_set(bool(autostart))
+            except Exception as e:
+                err = "자동 실행 설정을 바꾸지 못했어요: %s" % e
+        return {"ok": True, "autostart_error": err}
 
     def check_update(self, manual):
         return UPDATER.check(bool(manual))
@@ -1672,6 +1723,7 @@ class Api:
 
 
 def main():
+    autostart_heal()
     try:  # 직전 업데이트에서 남은 이전 버전 파일 정리
         if getattr(sys, "frozen", False) and os.path.exists(sys.executable + ".old"):
             os.remove(sys.executable + ".old")
