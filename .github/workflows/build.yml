@@ -3,7 +3,13 @@ name: Build EXE
 on:
   workflow_dispatch:
   push:
-    tags: ["v*"]
+    paths:
+      - "work_space.py"
+      - "requirements.txt"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -13,9 +19,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Stamp version
+        shell: python
+        run: |
+          import pathlib
+          p = pathlib.Path("work_space.py")
+          t = p.read_text(encoding="utf-8")
+          assert 'APP_VERSION = "dev"' in t
+          p.write_text(t.replace('APP_VERSION = "dev"', 'APP_VERSION = "${{ github.run_number }}"'), encoding="utf-8")
       - run: pip install -r requirements.txt pyinstaller
       - run: pyinstaller --noconsole --onefile --name WorkSpace --collect-all webview --collect-all pythonnet --collect-all clr_loader --collect-all holidays work_space.py
       - uses: actions/upload-artifact@v4
         with:
           name: WorkSpace-exe
           path: dist/WorkSpace.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: WorkSpace build ${{ github.run_number }}
+          files: dist/WorkSpace.exe
+          make_latest: true
