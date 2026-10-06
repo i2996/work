@@ -5,17 +5,25 @@ WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불�
 - 메인창 : 업무 참고 메모 / 미니 달력 / 3일 TO-DO / 진행 / 전체 조회 / 업무 달력 / 통계
 - 미니창 : 오늘 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
 - 데이터 : exe(또는 .py)와 같은 폴더의 workspace_data.json 에 자동 저장
+- 업데이트 : GitHub Releases 의 새 빌드를 확인해 자동으로 교체 (설정에서 저장소 지정)
 - 화면은 Windows 내장 웹뷰(WebView2)로 그려집니다.
 """
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import webview
 
 APP_TITLE = "WORK SPACE"
+APP_VERSION = "dev"  # GitHub Actions 가 빌드할 때 빌드 번호로 바뀝니다
+API_BASE = "https://api.github.com"
 
 
 def app_dir():
@@ -25,6 +33,130 @@ def app_dir():
 
 
 DATA_PATH = os.path.join(app_dir(), "workspace_data.json")
+CONFIG_PATH = os.path.join(app_dir(), "workspace_config.json")
+
+
+# ───────────────────────── 자동 업데이트 (GitHub Releases) ─────────────────────────
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def load_config():
+    cfg = {"repo": "", "token": "", "auto": True}
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            cfg.update(json.load(f))
+    except Exception:
+        pass
+    return cfg
+
+
+def save_config(cfg):
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def _num(v):
+    m = re.search(r"(\d+)\s*$", str(v or ""))
+    return int(m.group(1)) if m else None
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """다른 서버로 넘어갈 때 인증 토큰은 보내지 않음 (GitHub → 파일 저장소 이동 시 필요)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(req.full_url).netloc:
+            for h in ("Authorization", "authorization"):
+                new.headers.pop(h, None)
+                new.unredirected_hdrs.pop(h, None)
+        return new
+
+
+def _open(url, token, accept="application/vnd.github+json", timeout=15):
+    headers = {"Accept": accept, "User-Agent": "WorkSpace-Updater", "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    return urllib.request.build_opener(_SafeRedirect).open(urllib.request.Request(url, headers=headers), timeout=timeout)
+
+
+class Updater:
+    def __init__(self):
+        self.pending = None
+
+    def check(self, manual):
+        cfg = load_config()
+        if not manual and not cfg.get("auto", True):
+            return {"status": "disabled"}
+        repo = (cfg.get("repo") or "").strip()
+        if not REPO_RE.match(repo):
+            return {"status": "no_repo", "message": "설정에서 GitHub 저장소(예: 아이디/저장소이름)를 먼저 입력해 주세요."}
+        try:
+            with _open("%s/repos/%s/releases/latest" % (API_BASE, repo), cfg.get("token")) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            msg = {401: "토큰이 올바르지 않거나 만료됐어요.",
+                   403: "GitHub 접속 제한에 걸렸어요. 잠시 뒤 다시 시도하거나 토큰을 설정해 주세요.",
+                   404: "저장소를 찾을 수 없거나 아직 릴리스(빌드 결과)가 없어요. 비공개 저장소라면 토큰이 필요해요."}.get(
+                e.code, "확인에 실패했어요 (오류 %s)" % e.code)
+            return {"status": "error", "message": msg}
+        except Exception:
+            return {"status": "error", "message": "인터넷에 연결되어 있지 않거나 GitHub에 접속하지 못했어요."}
+        tag = data.get("tag_name", "")
+        remote, local = _num(tag), _num(APP_VERSION)
+        asset = next((a for a in data.get("assets", []) if str(a.get("name", "")).lower() == "workspace.exe"), None)
+        if remote is None or asset is None:
+            return {"status": "error", "message": "최신 릴리스에서 WorkSpace.exe 를 찾지 못했어요."}
+        if local is None:
+            return {"status": "dev", "message": "개발 버전(.py 직접 실행)은 자동 업데이트를 하지 않아요.", "latest": remote}
+        if remote > local:
+            self.pending = {"url": asset["url"], "size": asset.get("size") or 0, "version": remote}
+            return {"status": "available", "version": remote, "current": local}
+        return {"status": "latest", "version": local}
+
+    def apply(self):
+        if not getattr(sys, "frozen", False):
+            return {"ok": False, "message": "exe 로 실행 중일 때만 업데이트할 수 있어요."}
+        if not self.pending:
+            r = self.check(True)
+            if r.get("status") != "available":
+                return {"ok": False, "message": r.get("message") or "새 버전이 없어요."}
+        cfg, exe = load_config(), sys.executable
+        new, part, old = exe + ".new", exe + ".new.part", exe + ".old"
+        try:
+            with _open(self.pending["url"], cfg.get("token"), accept="application/octet-stream", timeout=60) as r, open(part, "wb") as f:
+                shutil.copyfileobj(r, f, 1 << 20)
+            if self.pending["size"] and os.path.getsize(part) != self.pending["size"]:
+                raise IOError("다운로드한 파일 크기가 맞지 않아요")
+            os.replace(part, new)
+        except Exception as e:
+            for p in (part, new):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            return {"ok": False, "message": "내려받기에 실패했어요: %s" % e}
+        try:  # 실행 중인 exe 는 지울 수 없지만 이름은 바꿀 수 있어요
+            if os.path.exists(old):
+                os.remove(old)
+            os.replace(exe, old)
+            try:
+                os.replace(new, exe)
+            except Exception:
+                os.replace(old, exe)
+                raise
+        except Exception as e:
+            return {"ok": False, "message": "파일을 교체하지 못했어요: %s (폴더 쓰기 권한을 확인해 주세요)" % e}
+        env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen([exe], env=env, close_fds=True, creationflags=flags)
+        threading.Timer(1.2, lambda: os._exit(0)).start()
+        return {"ok": True, "message": "업데이트를 마쳤어요. 프로그램이 다시 시작돼요."}
+
+
+UPDATER = Updater()
 
 
 MINI_TITLE = APP_TITLE + " MINI"
@@ -391,6 +523,12 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .pp-opt b{font-size:14px}.pp-opt span{font-size:12px;opacity:.85}
 .pp-quick{margin-top:4px}
 .pp-quick button{width:auto;padding:0 16px}
+
+/* 업데이트 배너 / 설정 */
+.upd{flex:none;display:flex;align-items:center;gap:10px;background:var(--lav);border:1px solid #d9d0f0;color:var(--lav-ink);border-radius:14px;padding:8px 14px;font-weight:600}
+.upd .sp{flex:1}
+.upd .btn{padding:5px 12px}
+.verline{font-weight:700;font-size:15px;margin-bottom:2px}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -737,6 +875,38 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     setTimeout(() => { const i = $('#dayIn'); if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') acts.dayAdd(i.nextElementSibling); }); }, 0);
   }
 
+  /* 설정 / 자동 업데이트 */
+  const api = () => window.pywebview.api;
+  function showUpdate(info) {
+    const b = $('#updBanner'); if (!b) return;
+    b.classList.remove('hidden');
+    b.innerHTML = '<span>새 버전(build ' + esc(info.version) + ')이 있어요</span><span class="sp"></span>' +
+      '<button class="btn primary" data-act="updNow">지금 업데이트</button><button class="btn" data-act="updLater">나중에</button>';
+  }
+  async function runUpdate(setMsg) {
+    setMsg('새 버전을 내려받는 중이에요… 잠시만 기다려 주세요');
+    let r;
+    try { r = await api().apply_update(); } catch (e) { r = { ok: false, message: '업데이트 중 문제가 생겼어요.' }; }
+    setMsg(r.message, !r.ok);
+    return r;
+  }
+  async function openSettings() {
+    if (!hasPy()) { openModal(() => '<h3>설정</h3><p class="hint2">설정은 WorkSpace.exe 로 실행할 때 사용할 수 있어요.</p><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>'); return; }
+    const c = await api().get_config();
+    const M = openModal(() => '<h3>설정</h3><div class="form"><label>현재 버전</label><div class="verline">' + esc(c.version) + '</div>' +
+      '<label>GitHub 저장소 (주소 끝의 아이디/저장소이름)</label><input id="cfgRepo" value="' + esc(c.repo) + '" placeholder="예: myname/workspace">' +
+      '<label>접근 토큰 (비공개 저장소일 때만)</label><input id="cfgToken" type="password" autocomplete="off" placeholder="' + (c.token_set ? '저장됨 · 바꾸려면 새로 입력' : '공개 저장소면 비워 두세요') + '">' +
+      '<label class="chkline"><input id="cfgAuto" type="checkbox" ' + (c.auto ? 'checked' : '') + '>프로그램을 켤 때 새 버전을 자동으로 확인</label></div>' +
+      '<div class="err" id="cfgMsg"></div><div class="modal-actions">' + (c.token_set ? '<button class="btn" data-act="cfgClear">토큰 지우기</button>' : '') +
+      '<button class="btn" data-act="cfgCheck">지금 확인</button><button class="btn primary" data-act="cfgSave">저장</button></div>');
+    form = { M, c };
+  }
+  const cfgSave = async clear => {
+    const g = id => curModal.el.querySelector('#' + id);
+    await api().save_config(g('cfgRepo').value, g('cfgToken').value, g('cfgAuto').checked, !!clear);
+  };
+  const cfgMsg = (t, bad) => { const m = $('#cfgMsg'); if (m) { m.style.color = bad ? '' : 'var(--accent-ink)'; m.innerHTML = t; } };
+
   /* 일반 업무 미루기 */
   function openPostpone(key) {
     const o = L.occByKey(key);
@@ -820,7 +990,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   function openHolidays() {
     openModal(() => {
-      let h = '<h3>휴일 추가</h3><p class="hint2">기본 공휴일(대체공휴일 포함)은 자동 반영돼요.<br>임시공휴일·회사 휴무일만 추가하세요.</p><div class="mlist">';
+      let h = '<h3>휴일 추가</h3><p class="hint2">기본 공휴일(대체공휴일 포함)은 자동 반영돼요.<br>임시공휴일·휴무일만 추가하세요.</p><div class="mlist">';
       const ex = (S.extra_off || []).slice().sort((a, b) => a.date.localeCompare(b.date));
       if (!ex.length) h += '<div class="tempty">추가한 휴일이 없어요</div>';
       for (const x of ex) {
@@ -844,6 +1014,19 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   const acts = {
     toggleMini() { if (hasPy()) window.pywebview.api.toggle_mini(); },
     pin(el) { pinned = !pinned; el.classList.toggle('on', pinned); if (hasPy()) window.pywebview.api.set_topmost(pinned); },
+    openSettings() { openSettings(); },
+    async cfgSave() { await cfgSave(false); cfgMsg('저장했어요.'); },
+    async cfgClear() { await cfgSave(true); closeModal(); openSettings(); },
+    async cfgCheck() {
+      await cfgSave(false); cfgMsg('확인 중…');
+      const r = await api().check_update(true);
+      if (r.status === 'available') {
+        cfgMsg('새 버전(build ' + esc(r.version) + ')이 있어요 <button class="btn primary" style="margin-left:8px" data-act="cfgApply">지금 업데이트</button>');
+      } else cfgMsg(r.status === 'latest' ? '최신 버전이에요 👍' : esc(r.message || '확인하지 못했어요.'), r.status !== 'latest');
+    },
+    async cfgApply() { await runUpdate(cfgMsg); },
+    async updNow() { const b = $('#updBanner'); const r = await runUpdate((t, bad) => { b.innerHTML = '<span' + (bad ? ' style="color:var(--pink-ink)"' : '') + '>' + esc(t) + '</span>'; }); if (!r.ok) setTimeout(() => showUpdate({ version: '' }), 4000); },
+    updLater() { const b = $('#updBanner'); if (b) b.classList.add('hidden'); },
     postpone(el) { openPostpone(el.dataset.key); },
     ppApply(el) { if (L.postponeTask(el.dataset.key, P(el.dataset.date))) { closeModal(); commit(); } },
     ppCustom(el) { const v = $('#ppDate').value; if (v && L.postponeTask(el.dataset.key, P(v))) { closeModal(); commit(); } },
@@ -1289,7 +1472,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const root = $('#root');
     if (MODE === 'main') {
       root.innerHTML = '<div class="app"><div class="topbar"><div class="brand">▣ WORK SPACE</div><div class="top-actions"><span class="today-text" id="todayText"></span>' +
-        '<button class="btn" data-act="toggleMini">미니창</button></div></div>' +
+        '<button class="btn" data-act="openSettings">설정</button><button class="btn" data-act="toggleMini">미니창</button></div></div>' +
+        '<div class="upd hidden" id="updBanner"></div>' +
         '<div class="note-card"><div class="note-title">업무 참고 메모</div><textarea id="memo" spellcheck="false" placeholder="자주 보는 내용이나 기억할 것을 적어두세요"></textarea></div>' +
         '<div class="layout"><aside class="sidebar"><div class="side-cal" id="miniCal"></div><div class="side-todo">' + todoCard() + '</div></aside>' +
         '<main class="main"><div class="tabs" id="tabs"></div><div class="panel" id="panel"></div></main></div></div>';
@@ -1338,6 +1522,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     lastDay = iso(today());
     setInterval(() => { if (iso(today()) !== lastDay) { lastDay = iso(today()); render(); } }, 60000);
     window.__WS_READY = true;
+    if (MODE === 'main' && hasPy() && api().check_update) {
+      setTimeout(async () => { try { const r = await api().check_update(false); if (r && r.status === 'available') showUpdate(r); } catch (e) { /* ignore */ } }, 2500);
+    }
   }
 
   let booted = false;
@@ -1456,12 +1643,40 @@ class Api:
         self._core.show_mini(not self._core.mini_visible)
         return True
 
+    def get_config(self):
+        c = load_config()
+        return {"repo": c.get("repo", ""), "token_set": bool(c.get("token")), "auto": bool(c.get("auto", True)),
+                "version": ("build " + APP_VERSION) if _num(APP_VERSION) is not None else "개발 버전",
+                "frozen": bool(getattr(sys, "frozen", False))}
+
+    def save_config(self, repo, token, auto, clear_token):
+        c = load_config()
+        c["repo"] = (repo or "").strip().replace("https://github.com/", "").strip("/")
+        if clear_token:
+            c["token"] = ""
+        elif token:
+            c["token"] = token.strip()
+        c["auto"] = bool(auto)
+        save_config(c)
+        return True
+
+    def check_update(self, manual):
+        return UPDATER.check(bool(manual))
+
+    def apply_update(self):
+        return UPDATER.apply()
+
     def set_topmost(self, on):
         self._core.set_topmost(bool(on))
         return True
 
 
 def main():
+    try:  # 직전 업데이트에서 남은 이전 버전 파일 정리
+        if getattr(sys, "frozen", False) and os.path.exists(sys.executable + ".old"):
+            os.remove(sys.executable + ".old")
+    except OSError:
+        pass
     if os.path.exists(DATA_PATH):  # 실행할 때마다 직전 데이터를 백업
         try:
             shutil.copyfile(DATA_PATH, DATA_PATH + ".bak")
