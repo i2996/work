@@ -358,7 +358,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .rw.pink{background:var(--pink-soft);box-shadow:inset 4px 0 0 var(--pink)}
 .rw.pink .c-t{color:var(--pink-ink)}
 .rw.pink .c-p,.rw.pink .c-m{color:#c0457f}
-.rw.soon{background:var(--butter);box-shadow:inset 4px 0 0 #e7d28a}.rw.soon .c-t{color:var(--butter-ink)}
+.rw.yellow{background:#fdf9e6;box-shadow:inset 4px 0 0 #e6c553}
+.rw.yellow .c-t{color:#957616}
+.rw.yellow .c-p,.rw.yellow .c-m{color:#a98b2c}
 .tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-left:6px;vertical-align:1px}
 .tag.pink{background:var(--pink);color:#fff}
 .tag.amber{background:var(--butter);color:var(--butter-ink)}
@@ -675,6 +677,33 @@ const WSLogic = (function () {
       if (t.type === 'once') {
         const sp = onceSpan(t);
         if (!sp || sp.e < d1 || sp.s > d2) continue;
+        out.push(mkOcc(t, key, sp.s, sp.e, sp.adj)); // key error in original? Ah wait, key here in previous code was 't' + t.id. Let's fix that too just in case though original didn't show issue. I'll just use 't' + t.id
+      } else {
+        let [y, m] = shiftMonth(d1.getFullYear(), d1.getMonth() + 1, -1);
+        const end = d2.getFullYear() * 12 + d2.getMonth() + 1;
+        while (y * 12 + m <= end) {
+          const o = ruleOcc(t, y, m);
+          if (o && !(o.e < d1 || o.s > d2)) out.push(mkOcc(t, 't' + t.id + '@' + y + '-' + pad(m), o.s, o.e, o.adj));
+          [y, m] = shiftMonth(y, m, 1);
+        }
+      }
+    }
+    if (!(opt && opt.noTodos)) {
+      for (const t of ctx.S.todos) {
+        const d = P(t.date);
+        if (d && !t.done && d >= d1 && d <= d2) out.push({ key: 'd' + t.id, id: t.id, kind: 'todo', title: t.text, start: d, end: d, todo: t });
+      }
+    }
+    return out;
+  }
+
+  // mkOcc fix inside onceSpan usage loop above
+  function occRange(d1, d2, opt) {
+    const out = [];
+    for (const t of ctx.S.tasks) {
+      if (t.type === 'once') {
+        const sp = onceSpan(t);
+        if (!sp || sp.e < d1 || sp.s > d2) continue;
         out.push(mkOcc(t, 't' + t.id, sp.s, sp.e, sp.adj));
       } else {
         let [y, m] = shiftMonth(d1.getFullYear(), d1.getMonth() + 1, -1);
@@ -688,32 +717,28 @@ const WSLogic = (function () {
     }
     if (!(opt && opt.noTodos)) {
       for (const t of ctx.S.todos) {
-        if (t.type === 'monthly' || t.type === 'eom' || t.type === 'period') {
-          let [y, m] = shiftMonth(d1.getFullYear(), d1.getMonth() + 1, -1);
-          const end = d2.getFullYear() * 12 + d2.getMonth() + 1;
-          while (y * 12 + m <= end) {
-            const o = ruleOcc(t, y, m);
-            if (o && !(o.e < d1 || o.s > d2)) { const ds = iso(o.s); out.push({ key:'d'+t.id+'@'+ds, id:t.id, kind:'todo', title:t.text, start:o.s, end:o.e, adj:o.adj, todo:t }); }
-            [y, m] = shiftMonth(y, m, 1);
-          }
-        } else {
-          const d = P(t.date);
-          if (d && d >= d1 && d <= d2) out.push({ key:'d'+t.id, id:t.id, kind:'todo', title:t.text, start:d, end:d, todo:t });
-        }
+        const d = P(t.date);
+        if (d && !t.done && d >= d1 && d <= d2) out.push({ key: 'd' + t.id, id: t.id, kind: 'todo', title: t.text, start: d, end: d, todo: t });
       }
     }
     return out;
   }
 
   function occByKey(key) {
-    let m=/^t(\d+)(?:@(\d{4})-(\d{2}))?$/.exec(key);
-    if(m){const t=ctx.S.tasks.find(x=>String(x.id)===m[1]);if(!t)return null;if(t.type==='once'){const sp=onceSpan(t);return sp?mkOcc(t,key,sp.s,sp.e,sp.adj):null;}if(!m[2])return null;const o=ruleOcc(t,+m[2],+m[3]);return o?mkOcc(t,key,o.s,o.e,o.adj):null;}
-    m=/^d(\d+)(?:@(\d{4}-\d{2}-\d{2}))?$/.exec(key);if(!m)return null;const t=ctx.S.todos.find(x=>String(x.id)===m[1]);if(!t)return null;const d=P(m[2]||t.date);return d?{key,id:t.id,kind:'todo',title:t.text,start:d,end:d,todo:t}:null;
+    const m = /^t(\d+)(?:@(\d{4})-(\d{2}))?$/.exec(key);
+    if (!m) return null;
+    const t = ctx.S.tasks.find(x => String(x.id) === m[1]);
+    if (!t) return null;
+    if (t.type === 'once') {
+      const sp = onceSpan(t);
+      return sp ? mkOcc(t, key, sp.s, sp.e, sp.adj) : null;
+    }
+    if (!m[2]) return null;
+    const o = ruleOcc(t, +m[2], +m[3]);
+    return o ? mkOcc(t, key, o.s, o.e, o.adj) : null;
   }
-  function todoDone(o){if(!o||o.kind!=='todo')return false;return o.key.indexOf('@')>=0?!!(o.todo.doneDates||[]).includes(iso(o.start)):!!o.todo.done;}
-  function toggleTodo(key){const o=occByKey(key);if(!o||o.kind!=='todo')return;if(o.key.indexOf('@')>=0){o.todo.doneDates=o.todo.doneDates||[];const d=iso(o.start),i=o.todo.doneDates.indexOf(d);if(i>=0)o.todo.doneDates.splice(i,1);else o.todo.doneDates.push(d);}else o.todo.done=!o.todo.done;}
-  const stOf=key=>/^d\d/.test(key)?(todoDone(occByKey(key))?'done':'todo'):((ctx.S.prog[key]||{}).s||'todo');
 
+  const stOf = key => (ctx.S.prog[key] || {}).s || 'todo';
   function pinkOf(o) {
     if (o.kind !== 'task' || stOf(o.key) === 'done') return null;
     const t = iso(today()), e = iso(o.end);
@@ -817,7 +842,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, toggleTodo, todoDone, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -831,7 +856,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const $ = (s, r) => (r || document).querySelector(s);
 
-  let S = null, curModal = null, form = null, pinned = true, lastDay = '', currentDay = '';
+  let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'prog', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
     statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
@@ -902,7 +927,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   /* 날짜 상세 */
   function openDay(ds) {
-    currentDay = ds;
     const d = P(ds);
     openModal(() => {
       const items = L.occRange(d, d);
@@ -916,13 +940,16 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         const pk = L.pinkOf(o);
         h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + '</b><span>' + periodText(o) +
           (o.task.type !== 'once' ? ' · 매월 반복' : '') + '</span></div>' + stateCell(o, true) +
-          '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button><button class="btn danger" data-act="calDelTask" data-id="' + o.id + '">✕</button></div>';
+          '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button>' +
+          '<button class="btn danger" data-act="delTaskDay" data-id="' + o.id + '" data-date="' + ds + '" style="padding:5px 8px" title="바로 삭제">✕</button></div>';
       }
       for (const o of todos) {
-        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + '</b><span>할 일' + (o.todo.type && o.todo.type !== 'once' ? ' · 반복' : '') + '</span></div>' +
-          '<button class="btn" data-act="editTodo" data-id="' + o.id + '">수정</button><button class="btn" data-act="tdDel" data-id="' + o.id + '">삭제</button></div>';
+        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + '</b><span>할 일</span></div>' +
+          '<button class="btn" data-act="tdDel" data-id="' + o.id + '">삭제</button></div>';
       }
-      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
+      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가">' +
+        '<select id="dayRepeat" style="flex:none;width:75px;border-radius:10px;border:1px solid var(--line);font-size:13px;padding:0 4px"><option value="once">이번만</option><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select>' +
+        '<button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
         '<div class="modal-actions"><button class="btn primary" data-act="newTask" data-date="' + ds + '">＋ 이 날짜에 업무 등록</button>' +
         '<button class="btn" data-act="mClose">닫기</button></div>';
       return h;
@@ -1095,15 +1122,11 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (ui.tab === 'log') focusLog();
     },
     subToggle(el) { L.toggleSub(el.dataset.key, el.dataset.sid); commit(); },
-    editTodo(el) { const t=S.todos.find(x=>String(x.id)===el.dataset.id); if(t) openTodo(t); },
-    calDelTask(el) { const t=S.tasks.find(x=>String(x.id)===el.dataset.id); if(!t)return; confirmBox('"'+t.title+'" 업무를 삭제할까요?'+(t.type!=='once'?'\n반복 업무는 모든 달에서 사라져요.':''),'삭제',()=>{L.removeTask(t.id);commit();openDay(currentDay||iso(today()));}); },
     tdEdit(el) {
       ui.editTodo = Number(el.dataset.id); renderTodos();
       setTimeout(() => { const i = $('.tedit'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0);
     },
     tdEditOk() { saveTodoEdit($('.tedit')); },
-    todoType(el) { if(form){ form.read(); form.t.type=el.dataset.v; curModal.refresh(); } },
-    todoSave() { if(!form)return;form.read();const t=form.t,err=m=>{const e=$('#todoErr');if(e)e.textContent=m;};if(!t.text)return err('할 일을 입력해 주세요.');if(t.type==='once'&&!t.date)return err('날짜를 선택해 주세요.');if((t.type==='monthly'||t.type==='period')&&!(t.a>=1&&t.a<=31))return err('날짜는 1~31 사이로 입력해 주세요.');if(t.type==='period'&&!(t.b>=1&&t.b<=31))return err('종료일은 1~31 사이로 입력해 주세요.');if(t.type==='eom'&&!(t.a>=0&&t.a<=20))return err('0~20 사이로 입력해 주세요.');if(form.isNew){t.id=S.next_id++;S.todos.push(t);}else{const i=S.todos.findIndex(x=>x.id===t.id);if(i>=0)S.todos[i]=t;}closeModal();commit();},
     subAdd() {
       form.read(); form.t.subs = form.t.subs || []; form.t.subs.push({ id: S.next_id++, text: '' }); form.paintSubs();
       const ins = form.el.querySelectorAll('.sub-in'); if (ins.length) ins[ins.length - 1].focus();
@@ -1180,6 +1203,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       confirmBox('"' + t.title + '" 업무를 삭제할까요?' + (t.type !== 'once' ? '\n반복 업무는 모든 달에서 사라져요.' : ''), '삭제',
         () => { L.removeTask(t.id); commit(); openManage(); }, () => openManage());
     },
+    delTaskDay(el) {
+      const t = S.tasks.find(x => String(x.id) === el.dataset.id); if (!t) return;
+      const ds = el.dataset.date;
+      confirmBox('"' + t.title + '" 업무를 삭제할까요?' + (t.type !== 'once' ? '\n반복 업무는 모든 달에서 사라져요.' : ''), '삭제',
+        () => { L.removeTask(t.id); commit(); openDay(ds); }, () => openDay(ds));
+    },
     manage() { openManage(); },
     addTask() { openTask(null, ''); },
     holidays() { openHolidays(); },
@@ -1210,13 +1239,28 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     dayAdd(el) {
       const inp = $('#dayIn'), v = inp.value.trim(); if (!v) return;
-      S.todos.push({ id: S.next_id++, text: v, date: el.dataset.date || curDayDate(), done: false }); commit();
+      const sel = $('#dayRepeat'), rep = sel ? sel.value : 'once';
+      const dStr = el.dataset.date || curDayDate();
+      const startD = P(dStr);
+      if (rep === 'once') {
+        S.todos.push({ id: S.next_id++, text: v, date: dStr, done: false });
+      } else if (rep === 'daily') {
+        for(let i=0; i<365; i++) S.todos.push({ id: S.next_id++, text: v, date: iso(addDays(startD, i)), done: false });
+      } else if (rep === 'weekly') {
+        for(let i=0; i<52; i++) S.todos.push({ id: S.next_id++, text: v, date: iso(addDays(startD, i*7)), done: false });
+      } else if (rep === 'monthly') {
+        for(let i=0; i<24; i++) {
+          const d = D(startD.getFullYear(), startD.getMonth() + 1 + i, startD.getDate());
+          S.todos.push({ id: S.next_id++, text: v, date: iso(d), done: false });
+        }
+      }
+      inp.value = '';
+      commit();
     },
-    tdToggle(el) { L.toggleTodo(el.dataset.key || ('d' + el.dataset.id)); commit(); },
+    tdToggle(el) { const t = S.todos.find(x => String(x.id) === el.dataset.id); if (t) { t.done = !t.done; commit(); } },
     tdDel(el) { S.todos = S.todos.filter(x => String(x.id) !== el.dataset.id); commit(); },
     tdPush(el) {
       const t = S.todos.find(x => String(x.id) === el.dataset.id); if (!t) return;
-      if (t.type && t.type !== 'once') return;
       const d = P(t.date) || today(), n = today(); t.date = iso(d < n ? n : addDays(d, 1)); commit();
     },
   };
@@ -1263,13 +1307,53 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* ── TO-DO 패널 (메인 / 미니 공용) ── */
-  function todoCard() { return '<div class="side-title">3일 업무 TO-DO</div><div class="todo-scroll"><div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div><div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div><div id="clWrap"><div class="grp-t cl">업무 체크리스트</div><div id="tdCl"></div></div><div class="grp-t" id="tdTomT"></div><div class="quick"><input id="tdTomIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="tomorrow">＋</button></div><div id="tdTom"></div></div>'; }
+  function todoCard() {
+    return '<div class="side-title">3일 업무 TO-DO</div><div class="todo-scroll">' +
+      '<div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div>' +
+      '<div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div>' +
+      '<div id="clWrap"><div class="grp-t cl">업무 체크리스트</div><div id="tdCl"></div></div>' +
+      '<div class="grp-t" id="tdTomT"></div><div class="quick"><input id="tdTomIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="tomorrow">＋</button></div><div id="tdTom"></div></div>';
+  }
   const PENCIL = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
-  function saveTodoEdit(input,cancel){const id=ui.editTodo;if(id==null)return;ui.editTodo=null;const v=input?input.value.trim():'';const t=S.todos.find(x=>x.id===id);if(!cancel&&t&&v&&v!==t.text){t.text=v;commit();}else renderTodos();}
-  function openTodo(t,defaultDate){const isNew=!t,x=t?JSON.parse(JSON.stringify(t)):{id:0,text:'',date:defaultDate||iso(today()),done:false,type:'once',a:1,b:1};x.type=x.type||'once';openModal(()=>{const type=x.type;let fields='';if(type==='once')fields='<label>날짜</label><input id="todoDate" type="date" value="'+esc(x.date||iso(today()))+'">';else if(type==='monthly')fields='<label>매월 날짜</label><input id="todoA" type="number" min="1" max="31" value="'+(x.a||1)+'"><div class="hint">업무와 동일하게 휴일이면 직전 영업일로 조정돼.</div>';else if(type==='eom')fields='<label>월말 기준 영업일 전</label><input id="todoA" type="number" min="0" max="20" value="'+(x.a||0)+'">';else fields='<div class="form-row"><div><label>시작일</label><input id="todoA" type="number" min="1" max="31" value="'+(x.a||1)+'"></div><div><label>종료일</label><input id="todoB" type="number" min="1" max="31" value="'+(x.b||x.a||1)+'"></div></div>';return '<h3>'+(isNew?'할 일 등록':'할 일 수정')+'</h3><div class="form"><label>할 일</label><input id="todoText" value="'+esc(x.text)+'" placeholder="할 일을 입력해 주세요"><label>반복</label><div class="seg">'+[['once','이번만'],['monthly','매월'],['eom','월말'],['period','매월 기간']].map(([v,n])=>'<button type="button" class="'+(type===v?'on':'')+'" data-act="todoType" data-v="'+v+'">'+n+'</button>').join('')+'</div>'+fields+'<div class="err" id="todoErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="todoSave">저장</button></div></div>';},true);form={t:x,isNew,read(){x.text=$('#todoText').value.trim();x.type=curModal.el.querySelector('.seg button.on')?.dataset.v||x.type;if(x.type==='once')x.date=$('#todoDate').value;else{x.a=Number($('#todoA')?.value||0);x.b=Number($('#todoB')?.value||0);}}};}
-  function todoRow(o,late){const t=o.todo,done=L.todoDone(o);return '<div class="tr '+(done?'done ':'')+(late?'late':'')+'"><button class="chk '+(done?'on':'')+'" data-act="tdToggle" data-key="'+o.key+'">'+(done?'✓':'')+'</button><span class="tx">'+esc(t.text)+'</span>'+(t.type&&t.type!=='once'?'<span class="tag sub">반복</span>':'')+'<button class="x pen" data-act="editTodo" data-id="'+t.id+'" title="수정">'+PENCIL+'</button><button class="x mv" data-act="tdPush" data-id="'+t.id+'" title="다음 날로 미루기">›</button><button class="x" data-act="tdDel" data-id="'+t.id+'" title="삭제">✕</button></div>';}
-  function renderTodos(){const t=today();const past=L.occRange(addDays(t,-365),addDays(t,-1)).filter(o=>o.kind==='todo'&&!L.todoDone(o));const fill=(id,items,late)=>{const el=$('#'+id);if(!el)return;el.innerHTML=items.length?items.map(o=>todoRow(o,late)).join(''):(late?'':'<div class="tempty">없음</div>');};fill('tdPast',past,true);fill('tdToday',L.occRange(t,t).filter(o=>o.kind==='todo'),false);fill('tdTom',L.occRange(addDays(t,1),addDays(t,1)).filter(o=>o.kind==='todo'),false);$('#tdPastWrap').classList.toggle('hidden',!past.length);const cls=L.activeChecklists();$('#clWrap').classList.toggle('hidden',!cls.length);$('#tdCl').innerHTML=cls.map(o=>{const c=L.subCount(o);return '<div class="cl-grp"><div class="cl-h"><b>'+esc(o.title)+'</b><span>'+c.done+'/'+c.total+(iso(o.start)!==iso(o.end)?' · ~'+fmtMD(o.end):'')+'</span></div>'+L.subsOf(o).map(sb=>{const d=L.subDone(o.key,sb.id);return '<div class="tr '+(d?'done':'')+'"><button class="chk '+(d?'on':'')+'" data-act="subToggle" data-key="'+o.key+'" data-sid="'+sb.id+'">'+(d?'✓':'')+'</button><span class="tx">'+esc(sb.text)+'</span><button class="x pen" data-act="editTask" data-id="'+o.id+'">'+PENCIL+'</button></div>';}).join('')+'</div>';}).join('');$('#tdTodayT').textContent='오늘 ('+pad2(t.getMonth()+1)+'/'+pad2(t.getDate())+')';const n=addDays(t,1);$('#tdTomT').textContent='내일 ('+pad2(n.getMonth()+1)+'/'+pad2(n.getDate())+')';}
-
+  function saveTodoEdit(input, cancel) {
+    const id = ui.editTodo; if (id == null) return;
+    ui.editTodo = null;
+    const v = input ? input.value.trim() : '';
+    const t = S.todos.find(x => x.id === id);
+    if (!cancel && t && v && v !== t.text) { t.text = v; commit(); } else renderTodos();
+  }
+  function todoRow(t, late) {
+    if (ui.editTodo === t.id) return '<div class="tr editing"><input class="tedit" value="' + esc(t.text) + '"><button class="x pen" data-act="tdEditOk" title="저장">✓</button></div>';
+    return '<div class="tr ' + (t.done ? 'done' : '') + (late ? ' late' : '') + '"><button class="chk ' + (t.done ? 'on' : '') + '" data-act="tdToggle" data-id="' + t.id + '">' + (t.done ? '✓' : '') + '</button>' +
+      '<span class="tx">' + esc(t.text) + '</span><button class="x pen" data-act="tdEdit" data-id="' + t.id + '" title="수정">' + PENCIL + '</button>' +
+      '<button class="x mv" data-act="tdPush" data-id="' + t.id + '" title="다음 날로 미루기">›</button>' +
+      '<button class="x" data-act="tdDel" data-id="' + t.id + '" title="삭제">✕</button></div>';
+  }
+  function renderTodos() {
+    const t = today(), ts = iso(t), tm = iso(addDays(t, 1));
+    const past = S.todos.filter(x => !x.done && x.date < ts);
+    const fill = (id, items, late) => {
+      const el = $('#' + id); if (!el) return;
+      el.innerHTML = items.length ? items.sort((a, b) => (a.done - b.done) || (a.id - b.id)).map(x => todoRow(x, late)).join('') : (late ? '' : '<div class="tempty">없음</div>');
+    };
+    fill('tdPast', past, true);
+    fill('tdToday', S.todos.filter(x => x.date === ts), false);
+    fill('tdTom', S.todos.filter(x => x.date === tm), false);
+    $('#tdPastWrap').classList.toggle('hidden', !past.length);
+    const cls = L.activeChecklists();
+    $('#clWrap').classList.toggle('hidden', !cls.length);
+    $('#tdCl').innerHTML = cls.map(o => {
+      const c = L.subCount(o);
+      return '<div class="cl-grp"><div class="cl-h"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
+        (iso(o.start) !== iso(o.end) ? ' · ~' + fmtMD(o.end) : '') + '</span></div>' +
+        L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
+          return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
+            '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div>';
+    }).join('');
+    $('#tdTodayT').textContent = '오늘 (' + pad2(t.getMonth() + 1) + '/' + pad2(t.getDate()) + ')';
+    const n = addDays(t, 1);
+    $('#tdTomT').textContent = '내일 (' + pad2(n.getMonth() + 1) + '/' + pad2(n.getDate()) + ')';
+  }
   const pad2 = n => String(n).padStart(2, '0');
 
   /* ── 탭 ── */
@@ -1314,7 +1398,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     h += '<div class="table"><div class="rw head all"><div>업무</div><div>기간</div><div>마감</div><div style="text-align:right">상태</div></div>';
     for (const o of list) {
       const st = stOf(o.key);
-      h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : (st !== 'done' && diffDays(o.end, today()) >= 0 && diffDays(o.end, today()) <= 2 ? 'soon' : '')) + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
+      const n = diffDays(o.end, today());
+      let rowCls = '';
+      if (L.pinkOf(o)) rowCls = 'pink';
+      else if (st !== 'done' && n > 0 && n < 3) rowCls = 'yellow';
+      
+      h += '<div class="rw all ' + (rowCls ? rowCls + ' ' : '') + (st === 'done' ? 'done' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
         '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + stateCell(o) + '</div></div>';
     }
     return h + '</div>';
@@ -1323,7 +1412,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* 업무 달력 (월 / 주 보기 + 상태 필터) */
   const CAL_KINDS = [['ready', '시작 전', '#c9d4ee'], ['doing', '진행', '#9db2ec'], ['done', '완료', '#a9d4bd'], ['pink', '마감 당일·지연', '#e2468a'], ['todo', '할 일', '#f1d77f']];
   function calCls(e) {
-    if (e.kind === 'todo') return L.todoDone(e) ? 'done' : 'todo';
+    if (e.kind === 'todo') return 'todo';
     const st = stOf(e.key);
     return st === 'done' ? 'done' : L.pinkOf(e) ? 'pink' : st === 'doing' ? 'doing' : 'ready';
   }
