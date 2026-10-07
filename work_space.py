@@ -1102,7 +1102,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       setTimeout(() => { const i = $('.tedit'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0);
     },
     tdEditOk() { saveTodoEdit($('.tedit')); },
-    todoType(el) { if(form){form.t.type=el.dataset.v;form.read();curModal.refresh();} },
+    todoType(el) { if(form){ form.read(); form.t.type=el.dataset.v; curModal.refresh(); } },
     todoSave() { if(!form)return;form.read();const t=form.t,err=m=>{const e=$('#todoErr');if(e)e.textContent=m;};if(!t.text)return err('할 일을 입력해 주세요.');if(t.type==='once'&&!t.date)return err('날짜를 선택해 주세요.');if((t.type==='monthly'||t.type==='period')&&!(t.a>=1&&t.a<=31))return err('날짜는 1~31 사이로 입력해 주세요.');if(t.type==='period'&&!(t.b>=1&&t.b<=31))return err('종료일은 1~31 사이로 입력해 주세요.');if(t.type==='eom'&&!(t.a>=0&&t.a<=20))return err('0~20 사이로 입력해 주세요.');if(form.isNew){t.id=S.next_id++;S.todos.push(t);}else{const i=S.todos.findIndex(x=>x.id===t.id);if(i>=0)S.todos[i]=t;}closeModal();commit();},
     subAdd() {
       form.read(); form.t.subs = form.t.subs || []; form.t.subs.push({ id: S.next_id++, text: '' }); form.paintSubs();
