@@ -617,13 +617,20 @@ const WSLogic = (function () {
     return x;
   }
 
+  /* 주말·공휴일이면 직전 평일로. 단, 직전 평일이 전월로 넘어가면 해당 월의 첫 영업일로 */
+  function backOrFirst(n) {
+    const p = prevWork(n);
+    if (p.getMonth() !== n.getMonth() || p.getFullYear() !== n.getFullYear()) return nextWork(D(n.getFullYear(), n.getMonth() + 1, 1));
+    return p;
+  }
+
   /* 반복 업무: y년 m월의 발생 (시작, 종료, 조정 여부) */
   function ruleOcc(t, y, m) {
     const ml = mlen(y, m);
     const a = parseInt(t.a, 10) || 0, b = parseInt(t.b, 10) || 0;
     if (t.type === 'monthly') {
       const n = D(y, m, Math.min(Math.max(a, 1), ml));
-      const d = prevWork(n);
+      const d = backOrFirst(n);
       return { s: d, e: d, adj: !same(n, d) };
     }
     if (t.type === 'eom') {
@@ -636,7 +643,7 @@ const WSLogic = (function () {
       let ey = y, em = m;
       if (b < a) [ey, em] = shiftMonth(y, m, 1);
       const e0 = D(ey, em, Math.min(Math.max(b, 1), mlen(ey, em)));
-      const e = prevWork(e0);
+      const e = backOrFirst(e0);
       if (e < s) s = e;
       return { s, e, adj: !same(e0, e) };
     }
@@ -768,9 +775,9 @@ const WSLogic = (function () {
   }
 
   function describeTask(t) {
-    if (t.type === 'monthly') return '매월 ' + t.a + '일 (휴일이면 직전 평일)';
+    if (t.type === 'monthly') return '매월 ' + t.a + '일 (휴일이면 직전 평일 · 월초는 해당 월 첫 영업일)';
     if (t.type === 'eom') return parseInt(t.a, 10) === 0 ? '월말 마지막 영업일' : '월말 마지막 영업일 기준 ' + t.a + '영업일 전';
-    if (t.type === 'period') return '매월 ' + t.a + '일 ~ ' + t.b + '일 (종료일이 휴일이면 직전 평일)';
+    if (t.type === 'period') return '매월 ' + t.a + '일 ~ ' + t.b + '일 (종료일이 휴일이면 직전 평일 · 월초는 해당 월 첫 영업일)';
     const s = P(t.start), e = P(t.end);
     if (s && e && !same(s, e)) return iso(s) + ' ~ ' + iso(e);
     return iso(e || s);
@@ -853,7 +860,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   const periodText = o => (iso(o.start) === iso(o.end) ? fmtMD(o.end) : fmtMD(o.start) + ' ~ ' + fmtMD(o.end));
   function dueCell(o) {
     let h = fmtMD(o.end);
-    if (o.adj) h += '<span class="tag adj" title="주말·공휴일이라 직전 평일로 조정됐어요">조정</span>';
+    if (o.adj) h += '<span class="tag adj" title="주말·공휴일이라 마감일이 조정됐어요">조정</span>';
     const pk = L.pinkOf(o);
     const n = diffDays(o.end, today());
     if (pk === 'today') h += '<span class="tag pink">오늘 마감</span>';
@@ -978,8 +985,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '">' +
       '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
-      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 체크한 세부 업무도 함께 담기</label>' +
-      '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.</div></div>' +
+      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
+      '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>근무일지에는 체크한 세부 업무만 쉼표로 이어져 담기고, 업무명은 적히지 않아요.</div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button>' +
       '<button class="btn primary" data-act="fSave">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
@@ -1002,14 +1009,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<div class="hint">하루짜리 업무는 시작일과 마감일을 같게 하거나 마감일만 넣으세요.</div>';
       } else if (t.type === 'monthly') {
         h = '<label>날짜 (일)</label><input id="fA" type="number" min="1" max="31" value="' + t.a + '">' +
-          '<div class="hint">매월 N일이 주말·공휴일이면 직전 평일에 표시돼요.</div>';
+          '<div class="hint">매월 N일이 주말·공휴일이면 직전 평일에 표시돼요.<br>직전 평일이 전월로 넘어가면 해당 월의 첫 영업일로 잡혀요. (예: 2일이 일요일이면 3일)</div>';
       } else if (t.type === 'eom') {
         h = '<label>며칠 전 영업일</label><input id="fA" type="number" min="0" max="20" value="' + t.a + '">' +
           '<div class="hint">0 = 월말 마지막 영업일, 1 = 그 전 영업일.<br>말일이 휴일이면 앞 영업일을 기준으로 계산해요.</div>';
       } else {
         h = '<div class="form-row"><div><label>시작일 (일)</label><input id="fA" type="number" min="1" max="31" value="' + t.a + '"></div>' +
           '<div><label>종료일 (일)</label><input id="fB" type="number" min="1" max="31" value="' + t.b + '"></div></div>' +
-          '<div class="hint">종료일이 주말·공휴일이면 직전 평일까지만 기간이 잡혀요.<br>종료일이 시작일보다 작으면 다음 달로 넘어가요.</div>';
+          '<div class="hint">종료일이 주말·공휴일이면 직전 평일까지만 기간이 잡혀요. 직전 평일이 전월로 넘어가면 해당 월의 첫 영업일이 종료일이 돼요.<br>종료일이 시작일보다 작으면 다음 달로 넘어가요.</div>';
       }
       g('fFields').innerHTML = h;
     };
@@ -1129,11 +1136,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       ui.calView = v; renderPanel();
     },
     calSel(el) {
-      const k = el.dataset.k;
-      if (k === 'all') ui.calSel.clear();
-      else if (!ui.calSel.size) ui.calSel.add(k);
-      else if (ui.calSel.has(k)) ui.calSel.delete(k);
-      else ui.calSel.add(k);
+      const k = el.dataset.k, sel = ui.calSel;
+      if (k === 'all') sel.clear();
+      else if (!sel.size) { if (k === 'done') CAL_KINDS.forEach(x => sel.add(x[0])); else sel.add(k); }   // 완료를 누르면 기본 보기에 완료도 함께
+      else if (sel.has(k)) sel.delete(k);
+      else sel.add(k);
+      if (sel.size === CAL_DEFAULT.length && CAL_DEFAULT.every(x => sel.has(x))) sel.clear();
       renderPanel();
     },
     listPrev() { [ui.listY, ui.listM] = shiftMonth(ui.listY, ui.listM, -1); renderPanel(); },
@@ -1348,7 +1356,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const st = stOf(e.key);
     return st === 'done' ? 'done' : L.pinkOf(e) ? 'pink' : st === 'doing' ? 'doing' : 'ready';
   }
-  const calVisible = e => !ui.calSel.size || ui.calSel.has(calCls(e));
+  const CAL_DEFAULT = ['ready', 'doing', 'pink', 'todo'];   // 기본: 완료 건은 숨김
+  const calVisible = e => { const c = calCls(e); return ui.calSel.size ? ui.calSel.has(c) : c !== 'done'; };
   function calMove(k) {
     if (ui.calView === 'week') {
       ui.calWeek = addDays(ui.calWeek, 7 * k);
@@ -1423,9 +1432,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     CAL_KINDS.forEach(k => { counts[k[0]] = 0; });
     all.forEach(e => { counts[calCls(e)]++; });
     const evs = all.filter(calVisible);
-    const chips = '<div class="chips"><button class="chip ' + (ui.calSel.size ? '' : 'on') + '" data-act="calSel" data-k="all">전체</button>' +
+    const chips = '<div class="chips"><button class="chip ' + (ui.calSel.size ? '' : 'on') + '" data-act="calSel" data-k="all" title="완료 건을 뺀 모든 업무">전체 (완료 제외)</button>' +
       CAL_KINDS.map(([k, n, c]) => '<button class="chip ' + (ui.calSel.has(k) ? 'on' : '') + '" data-act="calSel" data-k="' + k + '"><i style="background:' + c + '"></i>' + n + '<span class="n">' + counts[k] + '</span></button>').join('') +
-      '<span class="chiphint">' + (ui.calSel.size ? '선택한 상태만 보여요 · 칩을 더 눌러 함께 보기' : '상태를 누르면 그것만 따로 볼 수 있어요') + '</span></div>';
+      '<span class="chiphint">' + (ui.calSel.size ? '선택한 상태만 보여요 · 칩을 더 눌러 함께 보거나 "전체"로 돌아가요' : '완료 건은 기본으로 숨겨요 · "완료"를 누르면 함께 보여요') + '</span></div>';
     return '<div class="sec-head"><div><h2>업무 달력</h2></div><div class="nav"><button data-act="calPrev">‹</button><span class="lbl lblw">' + title + '</span><button data-act="calNext">›</button><button data-act="calToday">' + (week ? '이번 주' : '오늘') + '</button>' +
       '<span class="seg segsm"><button type="button" class="' + (week ? '' : 'on') + '" data-act="calView" data-v="month">월</button><button type="button" class="' + (week ? 'on' : '') + '" data-act="calView" data-v="week">주</button></span>' +
       '<span style="width:6px"></span><button data-act="holidays">휴일 추가</button><button data-act="manage">업무 관리</button><button class="btn primary" data-act="addTask">＋ 업무 등록</button></div></div>' +
@@ -1443,8 +1452,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const withSubs = S.logSubs !== false;
     const lines = [];
     for (const o of items) {
-      lines.push(o.title);
-      if (withSubs && o.task.logSubs !== false) for (const sb of L.subsOf(o)) if (L.subDone(o.key, sb.id)) lines.push('  - ' + sb.text);
+      const picked = (withSubs && o.task.logSubs !== false) ? L.subsOf(o).filter(sb => L.subDone(o.key, sb.id)).map(sb => sb.text) : [];
+      lines.push(picked.length ? picked.join(', ') : o.title);
     }
     return { text: lines.join('\n'), count: items.length };
   }
@@ -1456,7 +1465,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       ' 완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
       '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
-      '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="체크한 세부 업무를 근무일지에 함께 담을지 정해요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
+      '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="켜면 세부 업무가 있는 업무는 업무명 대신 체크한 세부 업무가 쉼표로 이어져 담겨요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
       '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
       '<textarea id="logText" class="logbox" readonly spellcheck="false">' + esc(r.text) + '</textarea>' +
       (r.count ? '' : '<div class="sub" style="margin-top:8px">아직 완료한 업무가 없어요. 진행 탭에서 ✓완료를 누르면 여기에 담겨요.</div>');
