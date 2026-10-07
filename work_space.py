@@ -970,6 +970,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const t = task ? JSON.parse(JSON.stringify(task)) :
       { id: 0, title: '', type: 'once', a: 25, b: 28, start: preset || '', end: preset || '', time: '', adjust: true, subs: [] };
     t.subs = t.subs || [];
+    if (t.logSubs === undefined) t.logSubs = true;
     const TYPES = [['once', '이번만'], ['monthly', '매월 N일'], ['eom', '월말 기준'], ['period', '매월 기간']];
     const M = openModal(() => '<h3>' + (isNew ? '업무 등록' : '업무 수정') + '</h3><div class="form">' +
       '<label>업무명</label><input id="fTitle" value="' + esc(t.title) + '" placeholder="예: 월말 자료 정리">' +
@@ -977,6 +978,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '">' +
       '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
+      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 체크한 세부 업무도 함께 담기</label>' +
       '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.</div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button>' +
       '<button class="btn primary" data-act="fSave">저장</button></div>');
@@ -984,6 +986,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const read = () => {
       if (g('fTitle')) t.title = g('fTitle').value.trim();
       if (g('fTime')) t.time = g('fTime').value;
+      if (g('fLogSubs')) t.logSubs = g('fLogSubs').checked;
       M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) { t.start = g('fStart').value; t.end = g('fEnd').value; t.adjust = g('fAdj').checked; }
       if (g('fA')) { const v = parseInt(g('fA').value, 10); if (!isNaN(v)) t.a = v; }
@@ -1097,6 +1100,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       S.prog['t' + id] = { s: 'doing', at: ts };
       i.value = ''; commit();
     },
+    logSubs() { S.logSubs = S.logSubs === false; commit(); },
     logPrev() { ui.logDate = iso(addDays(P(ui.logDate || iso(today())), -1)); renderPanel(); focusLog(); },
     logNext() { const n = iso(addDays(P(ui.logDate || iso(today())), 1)); ui.logDate = n >= iso(today()) ? '' : n; renderPanel(); focusLog(); },
     logToday() { ui.logDate = ''; renderPanel(); focusLog(); },
@@ -1436,8 +1440,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (p.s === 'done' && p.done_at === ds) { const o = L.occByKey(k); if (o) items.push(o); }
     }
     items.sort(L.byEnd);
-    const lines = items.map(o => o.title);
-    return { text: lines.join('\n'), count: lines.length };
+    const withSubs = S.logSubs !== false;
+    const lines = [];
+    for (const o of items) {
+      lines.push(o.title);
+      if (withSubs && o.task.logSubs !== false) for (const sb of L.subsOf(o)) if (L.subDone(o.key, sb.id)) lines.push('  - ' + sb.text);
+    }
+    return { text: lines.join('\n'), count: items.length };
   }
   function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) { ta.focus(); ta.select(); } }, 0); }
   function viewLog() {
@@ -1446,7 +1455,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return '<div class="sec-head"><div><h2>근무일지</h2><div class="sub">' + (isToday ? '오늘' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일') +
       ' 완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
-      '<button data-act="logNext">›</button><button data-act="logToday">오늘</button><button class="btn primary" data-act="logCopy">복사</button></div></div>' +
+      '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
+      '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="체크한 세부 업무를 근무일지에 함께 담을지 정해요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
+      '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
       '<textarea id="logText" class="logbox" readonly spellcheck="false">' + esc(r.text) + '</textarea>' +
       (r.count ? '' : '<div class="sub" style="margin-top:8px">아직 완료한 업무가 없어요. 진행 탭에서 ✓완료를 누르면 여기에 담겨요.</div>');
   }
