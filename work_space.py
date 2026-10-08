@@ -1631,32 +1631,39 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   /* 근무일지: 그날 완료 처리한 업무 + 체크한 할 일을 자동으로 모아요 */
   function logText(ds) {
+    const tdy = iso(today()), withSubs = S.logSubs !== false;
     const items = [];
     for (const k of Object.keys(S.prog)) {
       const p = S.prog[k];
-      if (p.s === 'done' && p.done_at === ds) { const o = L.occByKey(k); if (o) items.push(o); }
+      if (p.s !== 'doing' && p.s !== 'done') continue;
+      const o = L.occByKey(k); if (!o) continue;
+      const subMode = withSubs && o.task.logSubs !== false && L.subsOf(o).length > 0;
+      if (subMode) {   // 세부 업무를 담는 업무: 완료한 날에만, 업무명 대신 체크한 세부 업무를 쉼표로
+        if (p.s === 'done' && p.done_at === ds) {
+          const picked = L.subsOf(o).filter(sb => L.subDone(o.key, sb.id)).map(sb => sb.text);
+          items.push({ o, line: picked.length ? picked.join(', ') : o.title });
+        }
+        continue;
+      }
+      // 업무명만 담기는 업무: 진행을 시작한 날부터 완료한 날까지(아직 진행 중이면 오늘까지) 매일
+      const from = p.at || p.done_at || '', to = p.s === 'done' ? (p.done_at || from) : tdy;
+      if (from && ds >= from && ds <= to) items.push({ o, line: o.title });
     }
-    items.sort(L.byEnd);
-    const withSubs = S.logSubs !== false;
-    const lines = [];
-    for (const o of items) {
-      const picked = (withSubs && o.task.logSubs !== false) ? L.subsOf(o).filter(sb => L.subDone(o.key, sb.id)).map(sb => sb.text) : [];
-      lines.push(picked.length ? picked.join(', ') : o.title);
-    }
-    return { text: lines.join('\n'), count: items.length };
+    items.sort((a, b) => L.byEnd(a.o, b.o));
+    return { text: items.map(x => x.line).join('\n'), count: items.length };
   }
   function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) { ta.focus(); ta.select(); } }, 0); }
   function viewLog() {
     const ds = ui.logDate || iso(today()), d = P(ds), isToday = ds === iso(today());
     const r = logText(ds);
     return '<div class="sec-head"><div><h2>근무일지</h2><div class="sub">' + (isToday ? '오늘' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일') +
-      ' 완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C</div></div>' +
+      ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일 들어가요</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
       '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
       '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="켜면 세부 업무가 있는 업무는 업무명 대신 체크한 세부 업무가 쉼표로 이어져 담겨요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
       '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
       '<textarea id="logText" class="logbox" readonly spellcheck="false">' + esc(r.text) + '</textarea>' +
-      (r.count ? '' : '<div class="sub" style="margin-top:8px">아직 완료한 업무가 없어요. 진행 탭에서 ✓완료를 누르면 여기에 담겨요.</div>');
+      (r.count ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
   }
 
   /* 통계 */
