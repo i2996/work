@@ -585,6 +585,12 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* 등록 창: 마감 처리 방식 선택 간격 */
 #fFields input + label,#fFields .form-row + label{margin-top:12px}
+
+/* 날짜 상세: 할 일 체크 / 기한 입력 */
+.mitem .chk{margin-right:2px}
+.mitem.doneitem .mt b{text-decoration:line-through;color:var(--faint)}
+.mitem.doneitem .mt span{color:var(--faint)}
+.quick .dueIn{flex:none;width:150px;padding:6px 8px;font-size:13px}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -682,6 +688,13 @@ const WSLogic = (function () {
     return { key, id: t.id, kind: 'task', task: t, title: (t.time ? t.time + ' ' : '') + t.title, start: s, end: e, adj: !!adj };
   }
 
+  /* 할 일의 기한: 날짜(시작)부터 기한(due)까지. 기한이 없으면 그 하루 */
+  function todoEnd(t) {
+    const s = P(t.date), e = P(t.due) || s;
+    return s && e < s ? s : e;
+  }
+  function todoOn(t, d) { const s = P(t.date); return !!s && d >= s && d <= todoEnd(t); }
+
   const isSkipped = key => !!(ctx.S.skip || {})[key];
 
   /* 반복 할 일(rtodos): 업무처럼 반복 규칙으로 업무 달력·TO-DO 에 나타나는 할 일 */
@@ -723,8 +736,11 @@ const WSLogic = (function () {
     if (!(opt && opt.noTodos)) {
       for (const o of rtodoRange(d1, d2, false)) out.push(o);
       for (const t of ctx.S.todos) {
-        const d = P(t.date);
-        if (d && !t.done && d >= d1 && d <= d2) out.push({ key: 'd' + t.id, id: t.id, kind: 'todo', title: t.text, start: d, end: d, todo: t });
+        const s = P(t.date);
+        if (!s || t.done) continue;
+        const e = todoEnd(t);
+        if (e < d1 || s > d2) continue;
+        out.push({ key: 'd' + t.id, id: t.id, kind: 'todo', title: t.text, start: s, end: e, todo: t });
       }
     }
     return out;
@@ -870,7 +886,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -961,12 +977,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     openModal(() => {
       const items = L.occRange(d, d);
       const tasks = items.filter(o => o.kind === 'task').sort(L.byEnd);
-      const todos = items.filter(o => o.kind === 'todo');
+      const plainTodos = S.todos.filter(x => L.todoOn(x, d));
+      const rts = L.rtodoRange(d, d, true);
       const hn = holName(d);
       const xb = (act, attrs) => '<button class="xb" data-act="' + act + '" ' + attrs + ' title="삭제">✕</button>';
       let h = '<h3>' + d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 (' + WD[d.getDay()] + ')' +
         (hn ? '<span class="hol">' + esc(hn) + '</span>' : '') + '</h3><div class="mlist">';
-      if (!tasks.length && !todos.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
+      if (!tasks.length && !plainTodos.length && !rts.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
       for (const o of tasks) {
         const pk = L.pinkOf(o);
         h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + '</b><span>' + periodText(o) +
@@ -974,16 +991,20 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button>' +
           xb('dayDelTask', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
       }
-      for (const o of todos) {
-        if (o.recurring) {
-          h += '<div class="mitem"><div class="mt"><b>↻ ' + esc(o.title) + '</b><span>반복 할 일 · ' + esc(L.describeTask(o.rt)) + '</span></div>' +
-            '<button class="btn" data-act="rtEdit" data-id="' + o.id + '">수정</button>' +
-            xb('dayDelRT', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
-        } else {
-          h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + '</b><span>할 일</span></div>' + xb('dayDelTodo', 'data-id="' + o.id + '"') + '</div>';
-        }
+      const chk = (done, attrs) => '<button class="chk ' + (done ? 'on' : '') + '" ' + attrs + ' title="' + (done ? '완료 취소' : '미리 완료하기') + '">' + (done ? '✓' : '') + '</button>';
+      for (const t of plainTodos) {
+        const hasDue = t.due && t.due > t.date;
+        h += '<div class="mitem' + (t.done ? ' doneitem' : '') + '">' + chk(t.done, 'data-act="tdToggle" data-id="' + t.id + '"') + '<div class="mt"><b>' + esc(t.text) + '</b><span>할 일' +
+          (hasDue ? ' · ' + fmtMD(P(t.date)) + ' ~ 기한 ' + fmtMD(P(t.due)) : '') + '</span></div>' +
+          '<button class="btn" data-act="todoEdit" data-id="' + t.id + '">수정</button>' + xb('dayDelTodo', 'data-id="' + t.id + '"') + '</div>';
       }
-      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
+      for (const o of rts) {
+        h += '<div class="mitem' + (o.done ? ' doneitem' : '') + '">' + chk(o.done, 'data-act="rtToggle" data-key="' + o.key + '"') + '<div class="mt"><b>↻ ' + esc(o.title) + '</b><span>반복 할 일 · ' + esc(L.describeTask(o.rt)) + '</span></div>' +
+          '<button class="btn" data-act="rtEdit" data-id="' + o.id + '">수정</button>' +
+          xb('dayDelRT', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
+      }
+      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가"><input id="dayDue" type="date" class="dueIn" title="기한 (선택)" min="' + ds + '"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
+        '<div class="hint2" style="margin:-2px 0 4px">오른쪽 날짜는 기한(선택)이에요. 정하면 그 날까지 TO-DO와 달력에 이어서 떠요.</div>' +
         '<div class="modal-actions"><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일 (반복 설정)</button>' +
         '<button class="btn primary" data-act="newTask" data-date="' + ds + '">＋ 업무 등록</button>' +
         '<button class="btn" data-act="mClose">닫기</button></div>';
@@ -1049,7 +1070,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* 업무 / 할 일 등록 · 수정 (할 일도 업무처럼 반복 설정 가능) */
-  function openTask(task, preset, kind0) {
+  function openTask(task, preset, kind0, opts) {
+    const plain = !!(opts && opts.plain);   // 일반(이번만) 할 일 수정
     const isNew = !task;
     let kind = kind0 || 'task';
     const t = task ? JSON.parse(JSON.stringify(task)) :
@@ -1061,14 +1083,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const M = openModal(() => '<h3 id="fHead"></h3><div class="form">' +
       (isNew ? '<label>종류</label><div class="seg" id="fKind"></div>' : '') +
       '<label id="fTitleLb"></label><input id="fTitle" value="' + esc(t.title) + '">' +
-      '<label>반복 방식</label><div class="seg" id="fType"></div><div id="fFields"></div>' +
+      '<div id="fTypeWrap" class="form"><label>반복 방식</label><div class="seg" id="fType"></div></div><div id="fFields"></div>' +
       '<div id="fTaskOnly" class="form"><label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '">' +
       '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
       '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>근무일지에는 체크한 세부 업무만 쉼표로 이어져 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
-      (!isNew && kind === 'todo' ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>' : '') +
+      (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>' : '') +
       '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="fSave">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
     const read = () => {
@@ -1078,7 +1100,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) {
         t.start = g('fStart').value;
-        if (g('fEnd')) { t.end = g('fEnd').value; t.adjust = g('fAdj').checked; } else t.end = t.start;
+        if (g('fEnd')) { t.end = g('fEnd').value; if (g('fAdj')) t.adjust = g('fAdj').checked; } else t.end = t.start;
       }
       if (g('fA')) { const v = parseInt(g('fA').value, 10); if (!isNaN(v)) t.a = v; }
       if (g('fB')) { const v = parseInt(g('fB').value, 10); if (!isNaN(v)) t.b = v; }
@@ -1092,12 +1114,15 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       g('fTitle').placeholder = todo ? '예: 거래처 전화하기' : '예: 월말 자료 정리';
       g('fTaskOnly').classList.toggle('hidden', todo);
       if (g('fKind')) g('fKind').innerHTML = [['task', '업무'], ['todo', '할 일']].map(([v, n]) => '<button type="button" class="' + (kind === v ? 'on' : '') + '" data-act="fKind" data-v="' + v + '">' + n + '</button>').join('');
-      const types = (todo && !isNew) ? TYPES.filter(x => x[0] !== 'once') : TYPES;
+      const types = plain ? [TYPES[0]] : (todo && !isNew) ? TYPES.filter(x => x[0] !== 'once') : TYPES;
+      g('fTypeWrap').classList.toggle('hidden', plain);
       if (!types.some(x => x[0] === t.type)) t.type = types[0][0];
       g('fType').innerHTML = types.map(([v, n]) => '<button type="button" class="' + (t.type === v ? 'on' : '') + '" data-act="fType" data-v="' + v + '">' + n + '</button>').join('');
       let h = '';
       if (t.type === 'once' && todo) {
-        h = '<label>날짜</label><input id="fStart" type="date" value="' + esc(t.start || t.end || '') + '">';
+        h = '<div class="form-row"><div><label>날짜</label><input id="fStart" type="date" value="' + esc(t.start || '') + '"></div>' +
+          '<div><label>기한 (선택)</label><input id="fEnd" type="date" value="' + esc(t.end || '') + '"></div></div>' +
+          '<div class="hint">기한을 정하면 날짜부터 기한까지 TO-DO와 달력에 계속 표시돼요. 기한이 지나도 못 했으면 "지난 미완료"로 넘어가요.</div>';
       } else if (t.type === 'once') {
         h = '<div class="form-row"><div><label>시작일</label><input id="fStart" type="date" value="' + esc(t.start || '') + '"></div>' +
           '<div><label>마감일</label><input id="fEnd" type="date" value="' + esc(t.end || '') + '"></div></div>' +
@@ -1122,7 +1147,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       g('fSubs').innerHTML = t.subs.map((x, i) => '<div class="subrow"><input class="sub-in" data-i="' + i + '" value="' + esc(x.text) + '" placeholder="세부 업무 내용">' +
         '<button type="button" class="x" data-act="subDel" data-i="' + i + '" title="삭제">✕</button></div>').join('');
     };
-    form = { t, isNew, read, paint, paintSubs, g, el: M.el, getKind: () => kind, setKind: v => { kind = v; } };
+    form = { t, isNew, read, paint, paintSubs, g, el: M.el, getKind: () => kind, setKind: v => { kind = v; }, plain };
     paint(); paintSubs();
     setTimeout(() => { const i = g('fTitle'); if (i) i.focus(); }, 0);
   }
@@ -1271,6 +1296,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     fHol(el) { form.read(); form.t.holiday = el.dataset.v; form.paint(); },
     fKind(el) { form.read(); form.setKind(el.dataset.v); form.paint(); },
     rtEdit(el) { const r = (S.rtodos || []).find(x => String(x.id) === el.dataset.id); if (r) openTask({ id: r.id, title: r.text, type: r.type, a: r.a, b: r.b, holiday: r.holiday, start: '', end: '', time: '', adjust: true, subs: [] }, '', 'todo'); },
+    todoEdit(el) {
+      const x = S.todos.find(t => String(t.id) === el.dataset.id); if (!x) return;
+      openTask({ id: x.id, title: x.text, type: 'once', a: 0, b: 0, start: x.date, end: x.due || '', time: '', adjust: true, subs: [] }, '', 'todo', { plain: true });
+    },
     rtToggle(el) { L.toggleRT(el.dataset.key); commit(); },
     fDelRT() {
       const id = form.t.id, r = (S.rtodos || []).find(x => x.id === id); if (!r) return;
@@ -1313,9 +1342,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const err = m => { form.g('fErr').textContent = m; };
       if (form.getKind() === 'todo') {
         if (!t.title) return err('할 일 내용을 입력해 주세요.');
+        if (form.plain) {
+          const x = S.todos.find(q => q.id === t.id), d = t.start || t.end; if (!d) return err('날짜를 선택해 주세요.');
+          if (x) { x.text = t.title; x.date = d; x.due = (t.end && t.end > d) ? t.end : ''; }
+          closeModal(); commit(); return;
+        }
         if (t.type === 'once') {
           const d = t.start || t.end; if (!d) return err('날짜를 선택해 주세요.');
-          S.todos.push({ id: S.next_id++, text: t.title, date: d, done: false });
+          S.todos.push({ id: S.next_id++, text: t.title, date: d, due: (t.end && t.end > d) ? t.end : '', done: false });
         } else {
           if (t.type !== 'eom' && !(t.a >= 1 && t.a <= 31)) return err('날짜는 1~31 사이로 입력해 주세요.');
           if (t.type === 'period' && !(t.b >= 1 && t.b <= 31)) return err('종료일은 1~31 사이로 입력해 주세요.');
@@ -1345,7 +1379,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     dayAdd(el) {
       const inp = $('#dayIn'), v = inp.value.trim(); if (!v) return;
-      S.todos.push({ id: S.next_id++, text: v, date: el.dataset.date || curDayDate(), done: false }); commit();
+      const date = el.dataset.date || curDayDate(); let due = ($('#dayDue') || {}).value || ''; if (due && due <= date) due = '';
+      S.todos.push({ id: S.next_id++, text: v, date, due, done: false }); commit();
     },
     tdToggle(el) { const t = S.todos.find(x => String(x.id) === el.dataset.id); if (t) { t.done = !t.done; commit(); } },
     tdDel(el) { S.todos = S.todos.filter(x => String(x.id) !== el.dataset.id); commit(); },
@@ -1421,13 +1456,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function todoRow(t, late) {
     if (ui.editTodo === t.id) return '<div class="tr editing"><input class="tedit" value="' + esc(t.text) + '"><button class="x pen" data-act="tdEditOk" title="저장">✓</button></div>';
     return '<div class="tr ' + (t.done ? 'done' : '') + (late ? ' late' : '') + '"><button class="chk ' + (t.done ? 'on' : '') + '" data-act="tdToggle" data-id="' + t.id + '">' + (t.done ? '✓' : '') + '</button>' +
-      '<span class="tx">' + esc(t.text) + '</span><button class="x pen" data-act="tdEdit" data-id="' + t.id + '" title="수정">' + PENCIL + '</button>' +
-      '<button class="x mv" data-act="tdPush" data-id="' + t.id + '" title="다음 날로 미루기">›</button>' +
+      '<span class="tx">' + esc(t.text) + (t.due && t.due > t.date ? ' <small class="till">~' + fmtMD(P(t.due)) + '</small>' : '') + '</span><button class="x pen" data-act="tdEdit" data-id="' + t.id + '" title="수정">' + PENCIL + '</button>' +
+      (t.due && t.due > t.date ? '' : '<button class="x mv" data-act="tdPush" data-id="' + t.id + '" title="다음 날로 미루기">›</button>') +
       '<button class="x" data-act="tdDel" data-id="' + t.id + '" title="삭제">✕</button></div>';
   }
   function renderTodos() {
     const t = today(), ts = iso(t), tm = iso(addDays(t, 1));
-    const past = S.todos.filter(x => !x.done && x.date < ts);
+    const past = S.todos.filter(x => !x.done && L.todoEnd(x) && iso(L.todoEnd(x)) < ts);   // 기한이 지난 미완료
     const fill = (id, items, late, rts) => {
       const el = $('#' + id); if (!el) return;
       rts = rts || [];
@@ -1435,8 +1470,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       el.innerHTML = html || (late ? '' : '<div class="tempty">없음</div>');
     };
     fill('tdPast', past, true);
-    fill('tdToday', S.todos.filter(x => x.date === ts), false, L.rtodoRange(t, t, true));
-    fill('tdTom', S.todos.filter(x => x.date === tm), false, L.rtodoRange(addDays(t, 1), addDays(t, 1), true));
+    fill('tdToday', S.todos.filter(x => L.todoOn(x, t)), false, L.rtodoRange(t, t, true));
+    fill('tdTom', S.todos.filter(x => L.todoOn(x, addDays(t, 1))), false, L.rtodoRange(addDays(t, 1), addDays(t, 1), true));
     $('#tdPastWrap').classList.toggle('hidden', !past.length);
     const cls = L.activeChecklists();
     $('#clWrap').classList.toggle('hidden', !cls.length);
