@@ -816,16 +816,33 @@ const WSLogic = (function () {
   function toggleSub(key, sid) {
     ctx.S.subdone = ctx.S.subdone || {};
     const k = key + ':' + sid;
-    if (ctx.S.subdone[k]) delete ctx.S.subdone[k]; else ctx.S.subdone[k] = 1;
+    if (ctx.S.subdone[k]) delete ctx.S.subdone[k]; else ctx.S.subdone[k] = iso(today());   // 체크한 날짜를 기록 (근무일지용)
   }
   function subCount(o) {
     const subs = subsOf(o);
     return { total: subs.length, done: subs.filter(x => subDone(o.key, x.id)).length };
   }
-  /* 오늘 기간 안에 있고 아직 완료되지 않은 메인 업무 중 체크리스트가 있는 것 (지연 개념 없음) */
+  /* 체크한 날짜 (예전 데이터처럼 날짜가 없으면 업무를 완료한 날로 봄) */
+  function subDoneDate(o, sid) {
+    const v = (ctx.S.subdone || {})[o.key + ':' + sid];
+    if (typeof v === 'string') return v;
+    return v ? ((ctx.S.prog[o.key] || {}).done_at || '') : '';
+  }
+  /* 세부 업무를 모두 체크하면 메인 업무도 자동 완료 */
+  function autoFinish(key) {
+    const o = occByKey(key);
+    if (!o || stOf(key) === 'done') return false;
+    const subs = subsOf(o);
+    if (!subs.length || !subs.every(sb => subDone(key, sb.id))) return false;
+    finishTask(key);
+    return true;
+  }
+  /* TO-DO 의 '업무 체크리스트': 진행 중인 업무(기간이 지났어도 완료할 때까지) + 오늘이 기간 안인 업무. 지연 개념 없음 */
   function activeChecklists() {
-    const t = today();
-    return occRange(t, t, { noTodos: true }).filter(o => subsOf(o).length && stOf(o.key) !== 'done').sort(byEnd);
+    const t = today(), seen = new Map();
+    for (const o of occRange(t, t, { noTodos: true })) if (subsOf(o).length && stOf(o.key) !== 'done') seen.set(o.key, o);
+    for (const o of doingList()) if (subsOf(o).length) seen.set(o.key, o);
+    return [...seen.values()].sort(byEnd);
   }
 
   const nextWork = d => { let x = d; for (let i = 0; i < 40 && isOff(x); i++) x = addDays(x, 1); return x; };
@@ -886,7 +903,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -1088,7 +1105,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
-      '<div class="hint">메인 업무 기간 동안 TO-DO에 계속 표시돼요. 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>근무일지에는 체크한 세부 업무만 쉼표로 이어져 담기고, 업무명은 적히지 않아요.</div></div></div>' +
+      '<div class="hint">\'진행\'을 누르면 업무를 완료할 때까지 TO-DO에 표시돼요. (기간 안에는 시작 전에도 보여요) 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
       (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>' : '') +
       '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="fSave">저장</button></div>');
@@ -1216,7 +1233,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       ui.tab = el.dataset.tab; renderTabs(); renderPanel();
       if (ui.tab === 'log') focusLog();
     },
-    subToggle(el) { L.toggleSub(el.dataset.key, el.dataset.sid); commit(); },
+    subToggle(el) { L.toggleSub(el.dataset.key, el.dataset.sid); L.autoFinish(el.dataset.key); commit(); },   // 모두 체크하면 업무도 자동 완료
     tdEdit(el) {
       ui.editTodo = Number(el.dataset.id); renderTodos();
       setTimeout(() => { const i = $('.tedit'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0);
@@ -1478,7 +1495,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     $('#tdCl').innerHTML = cls.map(o => {
       const c = L.subCount(o);
       return '<div class="cl-grp"><div class="cl-h"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
-        (iso(o.start) !== iso(o.end) ? ' · ~' + fmtMD(o.end) : '') + '</span></div>' +
+        (iso(o.end) !== ts ? ' · ~' + fmtMD(o.end) : '') + '</span></div>' +
         L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
           return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
             '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div>';
@@ -1632,19 +1649,22 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* 근무일지: 그날 완료 처리한 업무 + 체크한 할 일을 자동으로 모아요 */
   function logText(ds) {
     const tdy = iso(today()), withSubs = S.logSubs !== false;
+    const keys = new Set(Object.keys(S.prog));
+    Object.keys(S.subdone || {}).forEach(k => keys.add(k.slice(0, k.lastIndexOf(':'))));
     const items = [];
-    for (const k of Object.keys(S.prog)) {
-      const p = S.prog[k];
-      if (p.s !== 'doing' && p.s !== 'done') continue;
+    for (const k of keys) {
       const o = L.occByKey(k); if (!o) continue;
-      const subMode = withSubs && o.task.logSubs !== false && L.subsOf(o).length > 0;
-      if (subMode) {   // 세부 업무를 담는 업무: 완료한 날에만, 업무명 대신 체크한 세부 업무를 쉼표로
-        if (p.s === 'done' && p.done_at === ds) {
-          const picked = L.subsOf(o).filter(sb => L.subDone(o.key, sb.id)).map(sb => sb.text);
-          items.push({ o, line: picked.length ? picked.join(', ') : o.title });
-        }
+      const p = S.prog[k] || {};
+      const subs = L.subsOf(o);
+      if (withSubs && o.task.logSubs !== false && subs.length) {
+        // 세부 업무를 담는 업무: 체크한 날 바로, 업무명 없이 그날 체크한 세부 업무를 쉼표로
+        const checked = subs.filter(sb => L.subDone(k, sb.id));
+        const picked = checked.filter(sb => L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);
+        if (picked.length) items.push({ o, line: picked.join(', ') });
+        else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
         continue;
       }
+      if (p.s !== 'doing' && p.s !== 'done') continue;
       // 업무명만 담기는 업무: 진행을 시작한 날부터 완료한 날까지(아직 진행 중이면 오늘까지) 매일
       const from = p.at || p.done_at || '', to = p.s === 'done' ? (p.done_at || from) : tdy;
       if (from && ds >= from && ds <= to) items.push({ o, line: o.title });
@@ -1657,7 +1677,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const ds = ui.logDate || iso(today()), d = P(ds), isToday = ds === iso(today());
     const r = logText(ds);
     return '<div class="sec-head"><div><h2>근무일지</h2><div class="sub">' + (isToday ? '오늘' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일') +
-      ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일 들어가요</div></div>' +
+      ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일, 세부 업무는 체크한 날 바로 들어가요</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
       '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
       '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="켜면 세부 업무가 있는 업무는 업무명 대신 체크한 세부 업무가 쉼표로 이어져 담겨요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
