@@ -591,6 +591,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mitem.doneitem .mt b{text-decoration:line-through;color:var(--faint)}
 .mitem.doneitem .mt span{color:var(--faint)}
 .quick .dueIn{flex:none;width:150px;padding:6px 8px;font-size:13px}
+
+/* 달력의 업무 막대/카드: 눌러서 바로 수정 */
+.bars .bar,.wk-span .bar{pointer-events:auto}
+.bar,.wcard{cursor:pointer;transition:filter .12s,box-shadow .12s}
+.bar:hover,.wcard:hover{filter:brightness(.95);box-shadow:0 1px 5px rgba(70,60,120,.22)}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -1317,6 +1322,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const x = S.todos.find(t => String(t.id) === el.dataset.id); if (!x) return;
       openTask({ id: x.id, title: x.text, type: 'once', a: 0, b: 0, start: x.date, end: x.due || '', time: '', adjust: true, subs: [] }, '', 'todo', { plain: true });
     },
+    barEdit(el) { const k = el.dataset.k; if (k === 'task') acts.editTask(el); else if (k === 'rt') acts.rtEdit(el); else acts.todoEdit(el); },
     rtToggle(el) { L.toggleRT(el.dataset.key); commit(); },
     fDelRT() {
       const id = form.t.id, r = (S.rtodos || []).find(x => x.id === id); if (!r) return;
@@ -1575,6 +1581,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const c = calCls(e);
     return c === 'done' ? '완료' : c === 'pink' ? (L.pinkOf(e) === 'today' ? '오늘 마감' : '지연') : c === 'doing' ? '진행' : '시작 전';
   }
+  /* 달력의 업무/할 일을 누르면 그 항목의 '수정'이 바로 열려요 (날짜 칸의 빈 곳을 누르면 날짜 상세) */
+  const editAttrs = e => 'data-act="barEdit" data-k="' + (e.kind === 'task' ? 'task' : e.recurring ? 'rt' : 'todo') + '" data-id="' + e.id + '"';
   function laneBars(evs, ws, we) {
     const segs = evs.filter(e => !(e.end < ws || e.start > we)).sort((a, b) => (a.start - b.start) || ((b.end - b.start) - (a.end - a.start)) || a.kind.localeCompare(b.kind));
     const lanes = []; let bars = '';
@@ -1583,7 +1591,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       let lane = lanes.findIndex(last => last < cs);
       if (lane < 0) { lanes.push(ce); lane = lanes.length - 1; } else lanes[lane] = ce;
       const cls = calCls(e);
-      bars += '<div class="bar ' + cls + (e.start < ws ? ' cl' : '') + (e.end > we ? ' cr' : '') + '" style="grid-column:' + (cs + 1) + '/' + (ce + 2) + ';grid-row:' + (lane + 1) +
+      bars += '<div class="bar ' + cls + (e.start < ws ? ' cl' : '') + (e.end > we ? ' cr' : '') + '" ' + editAttrs(e) + ' style="grid-column:' + (cs + 1) + '/' + (ce + 2) + ';grid-row:' + (lane + 1) +
         '" title="' + esc(e.title) + '">' + (cls === 'done' ? '✓ ' : e.recurring ? '↻ ' : '') + esc(e.title) + '</div>';
     }
     return { bars, n: lanes.length };
@@ -1619,7 +1627,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const off = d.getDay() === 0 || d.getDay() === 6 || holName(d);
       return '<div class="wkc' + (iso(d) === ts ? ' today' : '') + (off ? ' off' : '') + '" data-act="day" data-date="' + iso(d) + '">' + items.map(e => {
         const c = calCls(e);
-        return '<div class="wcard ' + c + '"><span class="wt">' + (e.recurring ? '↻ ' : '') + esc(e.title) + '</span><small>' + statusText(e) + '</small></div>';
+        return '<div class="wcard ' + c + '" ' + editAttrs(e) + '><span class="wt">' + (e.recurring ? '↻ ' : '') + esc(e.title) + '</span><small>' + statusText(e) + '</small></div>';
       }).join('') + '</div>';
     }).join('') + '</div></div></div></div>';
     return h;
