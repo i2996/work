@@ -596,6 +596,10 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .bars .bar,.wk-span .bar{pointer-events:auto}
 .bar,.wcard{cursor:pointer;transition:filter .12s,box-shadow .12s}
 .bar:hover,.wcard:hover{filter:brightness(.95);box-shadow:0 1px 5px rgba(70,60,120,.22)}
+
+/* 일정: 업무 달력에만 표시 */
+.bar.event{background:#ece6fa;color:#5a4a99}
+.wcard.event{background:#ece6fa;color:#5a4a99}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -720,6 +724,39 @@ const WSLogic = (function () {
     return out;
   }
 
+  /* 일정(events): 업무 달력에만 표시되는 항목. 진행/전체 조회/통계/TO-DO/근무일지와 무관 */
+  function eventRange(d1, d2) {
+    const out = [];
+    for (const x of ctx.S.events || []) {
+      const title = (x.time ? x.time + ' ' : '') + x.title;
+      if (x.type === 'monthly') {
+        let [y, m] = [d1.getFullYear(), d1.getMonth() + 1];
+        const end = d2.getFullYear() * 12 + d2.getMonth() + 1;
+        while (y * 12 + m <= end) {
+          const d = D(y, m, Math.min(Math.max(parseInt(x.a, 10) || 1, 1), mlen(y, m))), key = 'e' + x.id + '@' + y + '-' + pad(m);
+          if (d >= d1 && d <= d2 && !isSkipped(key)) out.push({ key, id: x.id, kind: 'event', recurring: true, ev: x, title, start: d, end: d });
+          [y, m] = shiftMonth(y, m, 1);
+        }
+      } else {
+        const s = P(x.start) || P(x.end);
+        if (!s) continue;
+        let e = P(x.end) || s; if (e < s) e = s;
+        if (e < d1 || s > d2) continue;
+        out.push({ key: 'e' + x.id, id: x.id, kind: 'event', recurring: false, ev: x, title, start: s, end: e });
+      }
+    }
+    return out;
+  }
+  function removeEvent(id) {
+    ctx.S.events = (ctx.S.events || []).filter(x => x.id !== id);
+    for (const k of Object.keys(ctx.S.skip || {})) if (k.startsWith('e' + id + '@')) delete ctx.S.skip[k];
+  }
+  function describeEvent(x) {
+    if (x.type === 'monthly') return '매월 ' + x.a + '일';
+    const s = P(x.start), e = P(x.end);
+    return s && e && !same(s, e) ? iso(s) + ' ~ ' + iso(e) : iso(s || e);
+  }
+
   function occRange(d1, d2, opt) {
     const out = [];
     for (const t of ctx.S.tasks) {
@@ -740,6 +777,7 @@ const WSLogic = (function () {
     }
     if (!(opt && opt.noTodos)) {
       for (const o of rtodoRange(d1, d2, false)) out.push(o);
+      for (const o of eventRange(d1, d2)) out.push(o);
       for (const t of ctx.S.todos) {
         const s = P(t.date);
         if (!s || t.done) continue;
@@ -885,6 +923,7 @@ const WSLogic = (function () {
     s.prog = s.prog || {};
     s.subdone = s.subdone || {};
     s.rtodos = s.rtodos || [];
+    s.events = s.events || [];
     s.rdone = s.rdone || {};
     s.skip = s.skip || {};
     s.extra_off = s.extra_off || [];
@@ -908,7 +947,7 @@ const WSLogic = (function () {
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -1001,17 +1040,24 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const tasks = items.filter(o => o.kind === 'task').sort(L.byEnd);
       const plainTodos = S.todos.filter(x => L.todoOn(x, d));
       const rts = L.rtodoRange(d, d, true);
+      const evs = items.filter(o => o.kind === 'event');
       const hn = holName(d);
       const xb = (act, attrs) => '<button class="xb" data-act="' + act + '" ' + attrs + ' title="삭제">✕</button>';
       let h = '<h3>' + d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 (' + WD[d.getDay()] + ')' +
         (hn ? '<span class="hol">' + esc(hn) + '</span>' : '') + '</h3><div class="mlist">';
-      if (!tasks.length && !plainTodos.length && !rts.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
+      if (!tasks.length && !plainTodos.length && !rts.length && !evs.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
       for (const o of tasks) {
         const pk = L.pinkOf(o);
         h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + '</b><span>' + periodText(o) +
           (o.task.type !== 'once' ? ' · 매월 반복' : '') + '</span></div>' + stateCell(o, true) +
           '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button>' +
           xb('dayDelTask', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
+      }
+      for (const o of evs) {
+        const multi = iso(o.start) !== iso(o.end);
+        h += '<div class="mitem"><div class="mt"><b>' + (o.recurring ? '↻ ' : '') + esc(o.title) + '</b><span>일정 · ' + (o.recurring ? '매월 ' + o.ev.a + '일' : multi ? fmtMD(o.start) + ' ~ ' + fmtMD(o.end) : '하루') + '</span></div>' +
+          '<button class="btn" data-act="evEdit" data-id="' + o.id + '">수정</button>' +
+          xb('dayDelEv', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
       }
       const chk = (done, attrs) => '<button class="chk ' + (done ? 'on' : '') + '" ' + attrs + ' title="' + (done ? '완료 취소' : '미리 완료하기') + '">' + (done ? '✓' : '') + '</button>';
       for (const t of plainTodos) {
@@ -1027,7 +1073,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       }
       h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가"><input id="dayDue" type="date" class="dueIn" title="기한 (선택)" min="' + ds + '"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
         '<div class="hint2" style="margin:-2px 0 4px">오른쪽 날짜는 기한(선택)이에요. 정하면 그 날까지 TO-DO와 달력에 이어서 떠요.</div>' +
-        '<div class="modal-actions"><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일 (반복 설정)</button>' +
+        '<div class="modal-actions"><button class="btn" data-act="newEvent" data-date="' + ds + '">＋ 일정</button><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일 (반복 설정)</button>' +
         '<button class="btn primary" data-act="newTask" data-date="' + ds + '">＋ 업무 등록</button>' +
         '<button class="btn" data-act="mClose">닫기</button></div>';
       return h;
@@ -1106,13 +1152,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       (isNew ? '<label>종류</label><div class="seg" id="fKind"></div>' : '') +
       '<label id="fTitleLb"></label><input id="fTitle" value="' + esc(t.title) + '">' +
       '<div id="fTypeWrap" class="form"><label>반복 방식</label><div class="seg" id="fType"></div></div><div id="fFields"></div>' +
-      '<div id="fTaskOnly" class="form"><label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '">' +
-      '<label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
+      '<div id="fTimeRow" class="form"><label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '"></div>' +
+      '<div id="fTaskOnly" class="form"><label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
       '<div class="hint">\'진행\'을 누르면 업무를 완료할 때까지 TO-DO에 표시돼요. (기간 안에는 시작 전에도 보여요) 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
-      (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>' : '') +
+      (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>'
+        : !isNew && kind === 'event' ? '<button class="btn danger" data-act="fDelEv" style="margin-right:auto">삭제</button>' : '') +
       '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="fSave">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
     const read = () => {
@@ -1130,18 +1177,26 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const holSeg = () => '<label>마감일이 주말·공휴일이면</label><div class="seg" id="fHol">' +
       [['prev', '앞 영업일로 당기기'], ['next', '다음 영업일로 미루기']].map(([v, n]) => '<button type="button" class="' + (t.holiday === v ? 'on' : '') + '" data-act="fHol" data-v="' + v + '">' + n + '</button>').join('') + '</div>';
     const paint = () => {
-      const todo = kind === 'todo';
-      g('fHead').textContent = (todo ? '할 일 ' : '업무 ') + (isNew ? '등록' : '수정');
-      g('fTitleLb').textContent = todo ? '할 일 내용' : '업무명';
-      g('fTitle').placeholder = todo ? '예: 거래처 전화하기' : '예: 월말 자료 정리';
-      g('fTaskOnly').classList.toggle('hidden', todo);
-      if (g('fKind')) g('fKind').innerHTML = [['task', '업무'], ['todo', '할 일']].map(([v, n]) => '<button type="button" class="' + (kind === v ? 'on' : '') + '" data-act="fKind" data-v="' + v + '">' + n + '</button>').join('');
-      const types = plain ? [TYPES[0]] : (todo && !isNew) ? TYPES.filter(x => x[0] !== 'once') : TYPES;
+      const todo = kind === 'todo', ev = kind === 'event';
+      g('fHead').textContent = (todo ? '할 일 ' : ev ? '일정 ' : '업무 ') + (isNew ? '등록' : '수정');
+      g('fTitleLb').textContent = todo ? '할 일 내용' : ev ? '일정 이름' : '업무명';
+      g('fTitle').placeholder = todo ? '예: 거래처 전화하기' : ev ? '예: 팀 회의' : '예: 월말 자료 정리';
+      g('fTaskOnly').classList.toggle('hidden', todo || ev);
+      g('fTimeRow').classList.toggle('hidden', todo);
+      if (g('fKind')) g('fKind').innerHTML = [['task', '업무'], ['todo', '할 일'], ['event', '일정']].map(([v, n]) => '<button type="button" class="' + (kind === v ? 'on' : '') + '" data-act="fKind" data-v="' + v + '">' + n + '</button>').join('');
+      const types = plain ? [TYPES[0]] : ev ? TYPES.filter(x => x[0] === 'once' || x[0] === 'monthly') : (todo && !isNew) ? TYPES.filter(x => x[0] !== 'once') : TYPES;
       g('fTypeWrap').classList.toggle('hidden', plain);
       if (!types.some(x => x[0] === t.type)) t.type = types[0][0];
       g('fType').innerHTML = types.map(([v, n]) => '<button type="button" class="' + (t.type === v ? 'on' : '') + '" data-act="fType" data-v="' + v + '">' + n + '</button>').join('');
       let h = '';
-      if (t.type === 'once' && todo) {
+      if (ev && t.type === 'once') {
+        h = '<div class="form-row"><div><label>시작일</label><input id="fStart" type="date" value="' + esc(t.start || '') + '"></div>' +
+          '<div><label>종료일 (선택)</label><input id="fEnd" type="date" value="' + esc(t.end || '') + '"></div></div>' +
+          '<div class="hint">종료일을 넣으면 여러 날에 걸친 일정이 돼요. 날짜는 주말·공휴일이어도 그대로 표시돼요.<br>일정은 업무 달력에만 보이고 진행·통계·근무일지에는 들어가지 않아요.</div>';
+      } else if (ev) {
+        h = '<label>날짜 (일)</label><input id="fA" type="number" min="1" max="31" value="' + t.a + '">' +
+          '<div class="hint">매월 N일에 표시돼요. 주말·공휴일이어도 그 날짜 그대로예요. (31일이 없는 달은 말일)</div>';
+      } else if (t.type === 'once' && todo) {
         h = '<div class="form-row"><div><label>날짜</label><input id="fStart" type="date" value="' + esc(t.start || '') + '"></div>' +
           '<div><label>기한 (선택)</label><input id="fEnd" type="date" value="' + esc(t.end || '') + '"></div></div>' +
           '<div class="hint">기한을 정하면 날짜부터 기한까지 TO-DO와 달력에 계속 표시돼요. 기한이 지나도 못 했으면 "지난 미완료"로 넘어가요.</div>';
@@ -1177,7 +1232,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function openManage() {
     openModal(() => {
       let h = '<h3>등록된 업무 관리</h3><p class="hint2">반복 업무를 지우면 모든 달에서 사라져요.</p><div class="mlist">';
-      if (!S.tasks.length && !(S.rtodos || []).length) h += '<div class="tempty">등록된 업무가 없어요</div>';
+      if (!S.tasks.length && !(S.rtodos || []).length && !(S.events || []).length) h += '<div class="tempty">등록된 업무가 없어요</div>';
       for (const t of S.tasks.slice().sort((a, b) => a.title.localeCompare(b.title, 'ko'))) {
         h += '<div class="mitem"><div class="mt"><b>' + esc((t.time ? t.time + ' ' : '') + t.title) + '</b><span>' + esc(L.describeTask(t)) + '</span></div>' +
           '<button class="btn" data-act="editTask" data-id="' + t.id + '">수정</button>' +
@@ -1188,7 +1243,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<button class="btn" data-act="rtEdit" data-id="' + r.id + '">수정</button>' +
           '<button class="btn danger" data-act="delRT" data-id="' + r.id + '">삭제</button></div>';
       }
-      return h + '</div><div class="modal-actions"><button class="btn" data-act="newTodo" data-date="">＋ 할 일 (반복 설정)</button><button class="btn primary" data-act="newTask" data-date="">＋ 업무 등록</button><button class="btn" data-act="mClose">닫기</button></div>';
+      for (const x of (S.events || []).slice().sort((a, b) => a.title.localeCompare(b.title, 'ko'))) {
+        h += '<div class="mitem"><div class="mt"><b>' + esc((x.time ? x.time + ' ' : '') + x.title) + '</b><span>일정 · ' + esc(L.describeEvent(x)) + '</span></div>' +
+          '<button class="btn" data-act="evEdit" data-id="' + x.id + '">수정</button>' +
+          '<button class="btn danger" data-act="delEv" data-id="' + x.id + '">삭제</button></div>';
+      }
+      return h + '</div><div class="modal-actions"><button class="btn" data-act="newEvent" data-date="">＋ 일정</button><button class="btn" data-act="newTodo" data-date="">＋ 할 일 (반복 설정)</button><button class="btn primary" data-act="newTask" data-date="">＋ 업무 등록</button><button class="btn" data-act="mClose">닫기</button></div>';
     }, true);
   }
 
@@ -1314,6 +1374,24 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     mYes() { const f = confirmBox.yes; closeModal(); if (f) f(); },
     mNo() { const f = confirmBox.no; closeModal(); if (f) f(); },
     newTask(el) { openTask(null, el.dataset.date || ''); },
+    newEvent(el) { openTask(null, el.dataset.date || '', 'event'); },
+    evEdit(el) {
+      const x = (S.events || []).find(q => String(q.id) === el.dataset.id); if (!x) return;
+      openTask({ id: x.id, title: x.title, type: x.type, a: x.a || 1, b: 0, start: x.start || '', end: x.end || '', time: x.time || '', adjust: true, subs: [] }, '', 'event');
+    },
+    fDelEv() {
+      const id = form.t.id, x = (S.events || []).find(q => q.id === id); if (!x) return;
+      confirmBox('"' + x.title + '" 일정을 삭제할까요?' + (x.type === 'monthly' ? '\n매월 반복 일정은 모든 달에서 사라져요.' : ''), '삭제', () => { L.removeEvent(id); commit(); }, () => {});
+    },
+    delEv(el) {
+      const x = (S.events || []).find(q => String(q.id) === el.dataset.id); if (!x) return;
+      confirmBox('"' + x.title + '" 일정을 삭제할까요?', '삭제', () => { L.removeEvent(x.id); commit(); openManage(); }, () => openManage());
+    },
+    dayDelEv(el) {
+      const x = (S.events || []).find(q => String(q.id) === el.dataset.id), ds = el.dataset.date; if (!x) return;
+      if (x.type === 'monthly') openDelRecurring({ key: el.dataset.key, id: x.id, title: x.title, ds, isTask: false, ev: true });
+      else confirmBox('"' + x.title + '" 일정을 삭제할까요?', '삭제', () => { L.removeEvent(x.id); commit(); openDay(ds); }, () => openDay(ds));
+    },
     newTodo(el) { openTask(null, el.dataset.date || '', 'todo'); },
     fHol(el) { form.read(); form.t.holiday = el.dataset.v; form.paint(); },
     fKind(el) { form.read(); form.setKind(el.dataset.v); form.paint(); },
@@ -1322,7 +1400,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const x = S.todos.find(t => String(t.id) === el.dataset.id); if (!x) return;
       openTask({ id: x.id, title: x.text, type: 'once', a: 0, b: 0, start: x.date, end: x.due || '', time: '', adjust: true, subs: [] }, '', 'todo', { plain: true });
     },
-    barEdit(el) { const k = el.dataset.k; if (k === 'task') acts.editTask(el); else if (k === 'rt') acts.rtEdit(el); else acts.todoEdit(el); },
+    barEdit(el) { const k = el.dataset.k; if (k === 'task') acts.editTask(el); else if (k === 'event') acts.evEdit(el); else if (k === 'rt') acts.rtEdit(el); else acts.todoEdit(el); },
     rtToggle(el) { L.toggleRT(el.dataset.key); commit(); },
     fDelRT() {
       const id = form.t.id, r = (S.rtodos || []).find(x => x.id === id); if (!r) return;
@@ -1343,7 +1421,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       openDelRecurring({ key: el.dataset.key, id: r.id, title: r.text, ds: el.dataset.date, isTask: false });
     },
     delSkip() { const c = delCtx; L.skipOcc(c.key); closeModal(); commit(); openDay(c.ds); },
-    delAll() { const c = delCtx; if (c.isTask) L.removeTask(c.id); else L.removeRTodo(c.id); closeModal(); commit(); openDay(c.ds); },
+    delAll() { const c = delCtx; if (c.ev) L.removeEvent(c.id); else if (c.isTask) L.removeTask(c.id); else L.removeRTodo(c.id); closeModal(); commit(); openDay(c.ds); },
     delBack() { openDay(delCtx.ds); },
     editTask(el) { const t = S.tasks.find(x => String(x.id) === el.dataset.id); if (t) openTask(t); },
     delTask(el) {
@@ -1363,6 +1441,18 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     fSave() {
       const { t, isNew } = form; form.read();
       const err = m => { form.g('fErr').textContent = m; };
+      if (form.getKind() === 'event') {
+        if (!t.title) return err('일정 이름을 입력해 주세요.');
+        const monthly = t.type === 'monthly';
+        if (monthly && !(t.a >= 1 && t.a <= 31)) return err('날짜는 1~31 사이로 입력해 주세요.');
+        const s0 = t.start || t.end;
+        if (!monthly && !s0) return err('날짜를 선택해 주세요.');
+        S.events = S.events || [];
+        const rec = { id: isNew ? S.next_id++ : t.id, title: t.title, type: monthly ? 'monthly' : 'once', a: t.a, time: t.time || '', start: monthly ? '' : s0, end: monthly ? '' : ((t.end && t.end >= s0) ? t.end : s0) };
+        const i = S.events.findIndex(x => x.id === rec.id);
+        if (i >= 0) S.events[i] = rec; else S.events.push(rec);
+        closeModal(); commit(); return;
+      }
       if (form.getKind() === 'todo') {
         if (!t.title) return err('할 일 내용을 입력해 주세요.');
         if (form.plain) {
@@ -1561,13 +1651,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* 업무 달력 (월 / 주 보기 + 상태 필터) */
-  const CAL_KINDS = [['ready', '시작 전', '#c9d4ee'], ['doing', '진행', '#9db2ec'], ['done', '완료', '#a9d4bd'], ['pink', '마감 당일·지연', '#e2468a'], ['todo', '할 일', '#f1d77f']];
+  const CAL_KINDS = [['ready', '시작 전', '#c9d4ee'], ['doing', '진행', '#9db2ec'], ['done', '완료', '#a9d4bd'], ['pink', '마감 당일·지연', '#e2468a'], ['todo', '할 일', '#f1d77f'], ['event', '일정', '#cdbdee']];
   function calCls(e) {
     if (e.kind === 'todo') return 'todo';
+    if (e.kind === 'event') return 'event';
     const st = stOf(e.key);
     return st === 'done' ? 'done' : L.pinkOf(e) ? 'pink' : st === 'doing' ? 'doing' : 'ready';
   }
-  const CAL_DEFAULT = ['ready', 'doing', 'pink', 'todo'];   // 기본: 완료 건은 숨김
+  const CAL_DEFAULT = ['ready', 'doing', 'pink', 'todo', 'event'];   // 기본: 완료 건은 숨김
   const calVisible = e => { const c = calCls(e); return ui.calSel.size ? ui.calSel.has(c) : c !== 'done'; };
   function calMove(k) {
     if (ui.calView === 'week') {
@@ -1578,11 +1669,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
   function statusText(e) {
     if (e.kind === 'todo') return '할 일';
+    if (e.kind === 'event') return '일정';
     const c = calCls(e);
     return c === 'done' ? '완료' : c === 'pink' ? (L.pinkOf(e) === 'today' ? '오늘 마감' : '지연') : c === 'doing' ? '진행' : '시작 전';
   }
   /* 달력의 업무/할 일을 누르면 그 항목의 '수정'이 바로 열려요 (날짜 칸의 빈 곳을 누르면 날짜 상세) */
-  const editAttrs = e => 'data-act="barEdit" data-k="' + (e.kind === 'task' ? 'task' : e.recurring ? 'rt' : 'todo') + '" data-id="' + e.id + '"';
+  const editAttrs = e => 'data-act="barEdit" data-k="' + (e.kind === 'task' ? 'task' : e.kind === 'event' ? 'event' : e.recurring ? 'rt' : 'todo') + '" data-id="' + e.id + '"';
   function laneBars(evs, ws, we) {
     const segs = evs.filter(e => !(e.end < ws || e.start > we)).sort((a, b) => (a.start - b.start) || ((b.end - b.start) - (a.end - a.start)) || a.kind.localeCompare(b.kind));
     const lanes = []; let bars = '';
