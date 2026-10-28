@@ -6,9 +6,12 @@ WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불�
 - 미니창 : 오늘 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
 - 데이터 : exe(또는 .py)와 같은 폴더의 workspace_data.json 에 자동 저장
 - 자동 실행 : 설정에서 Windows 시작 시 자동 실행 ON/OFF (현재 사용자 시작프로그램 등록)
+- 양식 : 엑셀 양식 등록·복사(openpyxl, 엑셀 실행 불필요), 안내문 양식 + 정산 대상 기간·마감 기한 자동 계산
 - 업데이트 : GitHub Releases 의 새 빌드를 확인해 자동으로 교체 (설정에서 저장소 지정)
 - 화면은 Windows 내장 웹뷰(WebView2)로 그려집니다.
 """
+import datetime as _dt
+import io
 import json
 import os
 import re
@@ -19,8 +22,16 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+import zipfile
+from copy import copy as _copy
 
 import webview
+
+try:  # 엑셀 양식 복사(엑셀을 실행하지 않고 파일을 직접 편집)에 사용
+    import openpyxl
+except Exception:
+    openpyxl = None
 
 APP_TITLE = "WORK SPACE"
 APP_VERSION = "dev"  # GitHub Actions 가 빌드할 때 빌드 번호로 바뀝니다
@@ -199,6 +210,248 @@ def autostart_heal():
             autostart_set(True)
     except Exception:
         pass
+
+
+# ───────────────────────── 엑셀 양식 복사 (엑셀 실행 없이, 이 PC 안에서만) ─────────────────────────
+TEMPLATE_DIR = os.path.join(app_dir(), "workspace_templates")   # 등록한 엑셀 양식 사본
+BACKUP_DIR = os.path.join(app_dir(), "workspace_backups")       # 복사 직전 원본 백업
+XLSX_EXT = (".xlsx", ".xlsm")
+_BAD_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
+
+
+def _pil_ok():
+    try:
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _scan_features(path):
+    """openpyxl 로 다시 저장하면 사라질 수 있는 요소를 찾음 (zip 안의 부품 이름·도형 여부로 판단)."""
+    found = []
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+
+        def has(prefix):
+            return any(n.startswith(prefix) for n in names)
+
+        if has("xl/charts/"):
+            found.append("차트")
+        if has("xl/pivotTables/") or has("xl/pivotCache/"):
+            found.append("피벗 테이블")
+        if has("xl/slicers/") or has("xl/slicerCaches/") or has("xl/timelines/"):
+            found.append("슬라이서·타임라인")
+        if has("xl/ctrlProps/") or has("xl/activeX/"):
+            found.append("양식 컨트롤·ActiveX")
+        if has("xl/embeddings/"):
+            found.append("삽입된 개체(OLE)")
+        if has("xl/connections.xml") or has("xl/queryTables/"):
+            found.append("외부 데이터 연결")
+        if has("xl/media/") and not _pil_ok():
+            found.append("그림")
+        for n in names:
+            if n.startswith("xl/drawings/") and n.endswith(".xml") and "_rels" not in n:
+                if re.search(rb"<(?:\w+:)?(?:sp|cxnSp|grpSp)[ >]", z.read(n)):
+                    found.append("도형·텍스트 상자")
+                    break
+        macro = "xl/vbaProject.bin" in names
+    return found, macro
+
+
+def xlsx_inspect(path, kind):
+    """kind: 'template'(양식 등록용) / 'target'(복사 대상). 문제가 있으면 ok=False 와 안내 문구를 돌려줌."""
+    if openpyxl is None:
+        return {"ok": False, "message": "엑셀 처리 라이브러리(openpyxl)를 찾지 못했어요. 프로그램을 최신 버전으로 업데이트해 주세요."}
+    path = os.path.abspath(path)
+    low = path.lower()
+    if low.endswith(".xls"):
+        return {"ok": False, "message": "예전 형식(.xls) 파일은 지원하지 않아요. 엑셀에서 .xlsx 로 저장한 뒤 사용해 주세요."}
+    if not low.endswith(XLSX_EXT):
+        return {"ok": False, "message": "엑셀 파일(.xlsx, .xlsm)을 선택해 주세요."}
+    if not os.path.isfile(path):
+        return {"ok": False, "message": "파일을 찾을 수 없어요."}
+    if kind == "target":
+        lock = os.path.join(os.path.dirname(path), "~$" + os.path.basename(path))
+        if os.path.exists(lock):
+            return {"ok": False, "message": "이 파일이 엑셀에서 열려 있는 것 같아요. 파일을 닫은 뒤 다시 시도해 주세요."}
+    try:
+        found, macro = _scan_features(path)
+        wb = openpyxl.load_workbook(path, read_only=True)
+        sheets = list(wb.sheetnames)
+        wb.close()
+    except zipfile.BadZipFile:
+        return {"ok": False, "message": "엑셀 파일을 읽을 수 없어요. 암호가 걸려 있거나 손상된 파일일 수 있어요."}
+    except Exception as e:
+        return {"ok": False, "message": "엑셀 파일을 읽지 못했어요: %s" % e}
+    if kind == "target":
+        warn = ["%s이(가) 있어요. 저장하면 사라질 수 있어요." % f for f in found]
+    else:
+        warn = ["%s은(는) 양식으로 복사되지 않아요." % f for f in found]
+        if macro:
+            warn.append("매크로는 양식으로 복사되지 않아요.")
+    return {"ok": True, "path": path, "name": os.path.splitext(os.path.basename(path))[0], "sheets": sheets, "warnings": warn}
+
+
+def _unique_title(wb, name):
+    base = _BAD_SHEET_CHARS.sub("_", name).strip() or "양식"
+    base = base[:31]
+    title, n = base, 2
+    while title in wb.sheetnames:
+        suffix = " (%d)" % n
+        title = base[:31 - len(suffix)] + suffix
+        n += 1
+    return title
+
+
+def _copy_sheet(src, dst_wb, title):
+    """다른 통합문서의 시트를 값·서식·병합·너비/높이·조건부서식·유효성 검사까지 복사."""
+    from openpyxl.comments import Comment
+    from openpyxl.worksheet.hyperlink import Hyperlink
+    dst = dst_wb.create_sheet(title)
+    try:
+        dst.sheet_format = _copy(src.sheet_format)
+        dst.sheet_properties = _copy(src.sheet_properties)
+    except Exception:
+        pass
+    for key, dim in src.column_dimensions.items():
+        d = dst.column_dimensions[key]
+        d.min, d.max = dim.min, dim.max
+        d.width, d.hidden, d.outlineLevel = dim.width, dim.hidden, dim.outlineLevel
+    for key, dim in src.row_dimensions.items():
+        d = dst.row_dimensions[key]
+        d.height, d.hidden, d.outlineLevel = dim.height, dim.hidden, dim.outlineLevel
+    for row in src.iter_rows():
+        for c in row:
+            if c.value is None and not c.has_style:
+                continue
+            n = dst.cell(row=c.row, column=c.column)
+            if c.value is not None:
+                n.value = _copy(c.value)
+            if c.has_style:
+                n.font, n.fill, n.border = _copy(c.font), _copy(c.fill), _copy(c.border)
+                n.alignment, n.protection, n.number_format = _copy(c.alignment), _copy(c.protection), c.number_format
+            if c.hyperlink:
+                h = c.hyperlink
+                n.hyperlink = Hyperlink(ref=n.coordinate, target=h.target, location=h.location, tooltip=h.tooltip, display=h.display)
+            if c.comment:
+                cm = Comment(c.comment.text, c.comment.author or "")
+                cm.width, cm.height = c.comment.width, c.comment.height
+                n.comment = cm
+    for rng in src.merged_cells.ranges:
+        dst.merge_cells(str(rng))
+    for step in (
+        lambda: setattr(dst, "freeze_panes", src.freeze_panes),
+        lambda: setattr(dst.sheet_view, "showGridLines", src.sheet_view.showGridLines),
+        lambda: setattr(dst.sheet_view, "zoomScale", src.sheet_view.zoomScale),
+        lambda: setattr(dst.auto_filter, "ref", src.auto_filter.ref),
+        lambda: setattr(dst, "page_margins", _copy(src.page_margins)),
+        lambda: setattr(dst, "print_options", _copy(src.print_options)),
+        lambda: [setattr(dst.page_setup, a, getattr(src.page_setup, a)) for a in ("orientation", "paperSize", "scale", "fitToWidth", "fitToHeight")],
+        lambda: setattr(dst, "HeaderFooter", _copy(src.HeaderFooter)),
+        lambda: setattr(dst, "print_title_rows", src.print_title_rows),
+        lambda: setattr(dst, "print_title_cols", src.print_title_cols),
+        lambda: setattr(dst, "print_area", re.sub(r"^.*!", "", src.print_area)) if src.print_area else None,
+        lambda: setattr(dst, "protection", _copy(src.protection)),
+    ):
+        try:
+            step()
+        except Exception:
+            pass
+    try:
+        for cf in src.conditional_formatting:
+            for rule in cf.rules:
+                dst.conditional_formatting.add(str(cf.sqref), _copy(rule))
+    except Exception:
+        pass
+    try:
+        for dv in src.data_validations.dataValidation:
+            dst.add_data_validation(_copy(dv))
+    except Exception:
+        pass
+    try:
+        from openpyxl.drawing.image import Image
+        for img in getattr(src, "_images", []):
+            ni = Image(io.BytesIO(img._data()))
+            ni.anchor = _copy(img.anchor)
+            ni.width, ni.height = img.width, img.height
+            dst.add_image(ni)
+    except Exception:
+        pass
+    try:
+        from openpyxl.worksheet.table import Table
+        used = {t.displayName for w in dst_wb.worksheets for t in w.tables.values()}
+        for t in src.tables.values():
+            name, k = t.displayName, 2
+            while name in used:
+                name = "%s_%d" % (t.displayName, k)
+                k += 1
+            used.add(name)
+            nt = Table(displayName=name, ref=t.ref, tableStyleInfo=_copy(t.tableStyleInfo))
+            dst.add_table(nt)
+    except Exception:
+        pass
+    return dst
+
+
+def _prune_backups(keep=40):
+    try:
+        files = sorted((os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR)), key=os.path.getmtime, reverse=True)
+        for f in files[keep:]:
+            os.remove(f)
+    except OSError:
+        pass
+
+
+def xlsx_copy(template_file, sheets, target):
+    """등록한 양식(template_file)의 시트들을 target 엑셀 파일의 맨 뒤에 추가. 원본은 먼저 백업."""
+    info = xlsx_inspect(target, "target")
+    if not info["ok"]:
+        return info
+    target = info["path"]
+    tpl = os.path.join(TEMPLATE_DIR, os.path.basename(template_file or ""))
+    if not os.path.isfile(tpl):
+        return {"ok": False, "message": "보관 중인 양식 파일을 찾을 수 없어요. 양식을 삭제한 뒤 다시 등록해 주세요."}
+    ext = os.path.splitext(target)[1]
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(target))[0]
+        backup = os.path.join(BACKUP_DIR, "%s_%s%s" % (stem, _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3], ext))
+        shutil.copy2(target, backup)
+        _prune_backups()
+    except OSError as e:
+        return {"ok": False, "message": "백업을 만들지 못해 복사하지 않았어요: %s" % e}
+    tmp = os.path.join(os.path.dirname(target), ".~workspace_%s%s" % (uuid.uuid4().hex[:8], ext))
+    try:
+        twb = openpyxl.load_workbook(tpl)
+        dwb = openpyxl.load_workbook(target, keep_vba=ext.lower() == ".xlsm")
+        added = []
+        for name in sheets or []:
+            if name in twb.sheetnames:
+                title = _unique_title(dwb, name)
+                _copy_sheet(twb[name], dwb, title)
+                added.append(title)
+        if not added:
+            return {"ok": False, "message": "복사할 시트를 찾지 못했어요. 양식의 시트 선택을 확인해 주세요."}
+        dwb.save(tmp)
+        chk = openpyxl.load_workbook(tmp, read_only=True)
+        ok = all(a in chk.sheetnames for a in added)
+        chk.close()
+        if not ok:
+            raise IOError("저장 결과를 확인하지 못했어요")
+        os.replace(tmp, target)   # 엑셀에서 열려 있으면 여기서 PermissionError
+    except PermissionError:
+        return {"ok": False, "message": "파일을 저장할 수 없어요. 엑셀에서 열려 있다면 닫은 뒤 다시 시도해 주세요. (원본은 그대로예요)"}
+    except Exception as e:
+        return {"ok": False, "message": "복사하지 못했어요: %s\n(원본은 그대로예요)" % e}
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+    return {"ok": True, "added": added, "target": target, "backup": backup,
+            "message": "'%s' 파일 맨 뒤에 시트 %d개를 추가했어요.\n추가한 시트: %s\n\n원본 백업: %s" % (os.path.basename(target), len(added), ", ".join(added), backup)}
 
 
 MINI_TITLE = APP_TITLE + " MINI"
@@ -600,6 +853,66 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* 일정: 업무 달력에만 표시 */
 .bar.event{background:#ece6fa;color:#5a4a99}
 .wcard.event{background:#ece6fa;color:#5a4a99}
+
+/* ───────── 양식 탭 ───────── */
+.fm-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.fm-note,.fm-hint{font-size:12px;color:var(--muted)}
+.fm-list{display:grid;gap:10px}
+.fm-card{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:#fcfcff}
+.fm-ic{flex:none;width:44px;height:44px;border-radius:12px;background:var(--mint);color:var(--mint-ink);font-weight:700;font-size:11px;display:grid;place-items:center;letter-spacing:.3px}
+.fm-main{flex:1;min-width:0}
+.fm-main b{display:block;font-size:14px;word-break:break-all}
+.fm-sub{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-all}
+.fm-sel{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.fm-sel select{padding:7px 10px;font-weight:600;background:#fff;border-radius:10px}
+.fm-sel .btn{padding:6px 12px}
+.fm-lab{font-size:12px;font-weight:700;color:#7d7b95;margin-right:2px}
+.fm-calc{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;margin-bottom:14px}
+.fm-box{border:1px solid var(--line);border-radius:16px;padding:14px 16px;background:#fff}
+.fm-box.s{background:#f4f7ff;border-color:#d6def7}
+.fm-box.d{background:#fff8ee;border-color:#f3dfbd}
+.fm-box.d.unset{background:#fff5f9;border-color:#f6c7dc}
+.fm-bt{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.fm-bm{font-size:12px;color:var(--muted);font-weight:600}
+.fm-badge{display:inline-flex;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;color:#fff}
+.fm-badge.s{background:var(--accent)}
+.fm-badge.d{background:#e0903a}
+.fm-box.d.unset .fm-badge.d{background:var(--pink)}
+.fm-k{font-size:12px;color:var(--muted)}
+.fm-big{font-size:18px;font-weight:700;margin:2px 0 6px;line-height:1.4}
+.fm-big.muted{color:var(--faint);font-size:16px}
+.fm-chk{font-size:12px;font-weight:600}
+.fm-chk.ok{color:var(--mint-ink)}.fm-chk.bad{color:var(--pink-ink)}
+.fm-rule{font-size:12px;color:#7d6a3f;margin-top:6px;line-height:1.6}
+.fm-box.d.unset .fm-rule{color:var(--pink-ink)}
+.fm-diff{font-size:12px;color:var(--lav-ink);background:var(--lav);border-radius:8px;padding:5px 9px;margin-top:8px;font-weight:600}
+.fm-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.fm-acts .btn{padding:5px 11px;font-size:12px}
+.fm-nbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.fm-phead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.fm-phead .sp{flex:1}
+.fm-leg{display:inline-flex;gap:6px}
+.fm-block{background:var(--pink-soft);border:1px solid #f7c3dc;color:var(--pink-ink);border-radius:12px;padding:9px 12px;font-size:12px;font-weight:600;line-height:1.7;margin-bottom:8px}
+.fm-preview{white-space:pre-wrap;word-break:break-word;border:1px solid var(--line);border-radius:14px;background:#fff;padding:16px 18px;line-height:1.85;font-size:14px;min-height:140px}
+.tk{border-radius:5px;padding:1px 4px;font-weight:600;font-style:normal}
+mark.tk-s{background:#dfe8ff;color:#2f469d}
+mark.tk-d{background:#ffe9c9;color:#8a4f0a}
+mark.tk-x{background:var(--pink-soft);color:var(--pink-ink);outline:1px dashed var(--pink)}
+mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.fm-body{width:100%;min-height:230px;resize:vertical;padding:12px 14px;line-height:1.8;font-size:14px;white-space:pre-wrap}
+.tkbar{display:grid;gap:6px}
+.tkrow{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.tkl{font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;color:#fff;margin-right:2px}
+.tkl.s{background:var(--accent)}.tkl.d{background:#e0903a}
+.chip.tkb{padding:3px 9px;font-size:12px}
+.chip.tkb-s{border-color:#d3dcf6;background:#f4f7ff;color:var(--accent-ink)}
+.chip.tkb-d{border-color:#f3dfbd;background:#fff8ee;color:#8a4f0a}
+.rrow{display:flex;gap:12px;align-items:center}
+.rrow input[type=number]{flex:1}
+.rex{margin:12px 0 2px;padding:10px 12px;background:#f7f6fb;border-radius:12px;font-size:13px;line-height:1.6}
+.rex .muted{color:var(--muted)}
+.xsheets{display:grid;gap:4px;max-height:180px;overflow:auto;padding:8px 10px;border:1px solid var(--line);border-radius:12px}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -924,6 +1237,9 @@ const WSLogic = (function () {
     s.subdone = s.subdone || {};
     s.rtodos = s.rtodos || [];
     s.events = s.events || [];
+    s.notices = s.notices || [];
+    s.xlsx = s.xlsx || [];
+    s.settle = s.settle || { rule: null, y: 0, m: 0, manual: null };
     s.rdone = s.rdone || {};
     s.skip = s.skip || {};
     s.extra_off = s.extra_off || [];
@@ -943,11 +1259,115 @@ const WSLogic = (function () {
     return s;
   }
 
+
+  /* ───────── 양식: 안내문 / 정산 대상 기간 / 마감 기한 ───────── */
+  const fmtFull = d => d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일(' + WD[d.getDay()] + ')';
+  const fmtMDW = d => (d.getMonth() + 1) + '월 ' + d.getDate() + '일(' + WD[d.getDay()] + ')';
+  /* 요일 검증용 독립 계산 (Sakamoto 알고리즘, 0=일요일). Date 객체의 요일과 따로 계산해 서로 맞는지 확인 */
+  function weekdayCalc(y, m, d) {
+    const t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    if (m < 3) y -= 1;
+    return (y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) + t[m - 1] + d) % 7;
+  }
+  const checkDate = d => !!d && !isNaN(d.getTime()) && weekdayCalc(d.getFullYear(), d.getMonth() + 1, d.getDate()) === d.getDay();
+
+  /* 정산 대상 기간: 선택한 월의 1일 ~ 말일 (윤년·월별 일수 자동) */
+  function settlePeriod(y, m) {
+    const start = D(y, m, 1), end = D(y, m, mlen(y, m));
+    const ok = checkDate(start) && checkDate(end) && start.getMonth() + 1 === m && end.getMonth() + 1 === m &&
+      start.getDate() === 1 && addDays(end, 1).getDate() === 1;
+    return { start, end, ok };
+  }
+
+  /* 마감 규칙: 사용자가 설정한 것만 사용 (설정 전에는 null → 날짜를 정하지 않음) */
+  const RULE_TYPES = {
+    fixed: '정산 대상 월 기준 N개월 뒤 D일',
+    nthbiz: '정산 대상 월 기준 N개월 뒤 K번째 영업일',
+    afterEnd: '정산 종료일로부터 N일 뒤',
+    bizAfterEnd: '정산 종료일로부터 N영업일 뒤',
+  };
+  const ADJUSTS = { none: '조정 안 함', prev: '앞 영업일로 당기기', next: '다음 영업일로 미루기' };
+  const intIn = (v, lo, hi) => { const n = parseInt(v, 10); return !isNaN(n) && n >= lo && n <= hi ? n : null; };
+  function ruleValid(r) {   // 올바르면 '' , 아니면 안내 문구
+    if (!r || !RULE_TYPES[r.type]) return '규칙 종류를 선택해 주세요.';
+    if ((r.type === 'fixed' || r.type === 'nthbiz') && intIn(r.monthOffset, 0, 24) === null) return '몇 개월 뒤인지 0~24 사이로 입력해 주세요.';
+    if (r.type === 'fixed' && r.day !== 'last' && intIn(r.day, 1, 31) === null) return '날짜는 1~31 사이로 입력하거나 말일을 선택해 주세요.';
+    if (r.type === 'nthbiz' && intIn(r.n, 1, 23) === null) return '영업일 순번은 1~23 사이로 입력해 주세요.';
+    if (r.type === 'afterEnd' && intIn(r.n, 0, 90) === null) return '일수는 0~90 사이로 입력해 주세요.';
+    if (r.type === 'bizAfterEnd' && intIn(r.n, 1, 60) === null) return '영업일 수는 1~60 사이로 입력해 주세요.';
+    if ((r.type === 'fixed' || r.type === 'afterEnd') && !ADJUSTS[r.adjust || 'none']) return '휴일 처리 방식을 선택해 주세요.';
+    return '';
+  }
+  function calcDeadline(r, y, m) {
+    if (!r || ruleValid(r)) return null;
+    const end = D(y, m, mlen(y, m));
+    let d;
+    if (r.type === 'fixed') {
+      const [ty, tm] = shiftMonth(y, m, intIn(r.monthOffset, 0, 24));
+      d = D(ty, tm, r.day === 'last' ? mlen(ty, tm) : Math.min(intIn(r.day, 1, 31), mlen(ty, tm)));
+    } else if (r.type === 'nthbiz') {
+      const [ty, tm] = shiftMonth(y, m, intIn(r.monthOffset, 0, 24));
+      const n = intIn(r.n, 1, 23); let cnt = 0;
+      d = D(ty, tm, 1);
+      for (let i = 0; i < 62; i++, d = addDays(d, 1)) if (!isOff(d) && ++cnt === n) break;
+    } else if (r.type === 'afterEnd') {
+      d = addDays(end, intIn(r.n, 0, 90));
+    } else {
+      const n = intIn(r.n, 1, 60); let cnt = 0;
+      d = end;
+      while (cnt < n) { d = addDays(d, 1); if (!isOff(d)) cnt++; }
+    }
+    if (r.type === 'fixed' || r.type === 'afterEnd') {
+      if (r.adjust === 'prev') d = prevWork(d); else if (r.adjust === 'next') d = nextWork(d);
+    }
+    return d;
+  }
+  function describeRule(r) {
+    if (!r || ruleValid(r)) return '';
+    const off = intIn(r.monthOffset, 0, 24);
+    const mo = off === 0 ? '정산 대상 월 당월' : off === 1 ? '정산 대상 월의 다음 달' : '정산 대상 월로부터 ' + off + '개월 뒤';
+    const adj = r.adjust === 'prev' ? ' (휴일이면 앞 영업일)' : r.adjust === 'next' ? ' (휴일이면 다음 영업일)' : '';
+    if (r.type === 'fixed') return mo + ' ' + (r.day === 'last' ? '말일' : r.day + '일') + adj;
+    if (r.type === 'nthbiz') return mo + ' ' + r.n + '번째 영업일';
+    if (r.type === 'afterEnd') return '정산 종료일로부터 ' + r.n + '일 뒤' + adj;
+    return '정산 종료일로부터 ' + r.n + '영업일 뒤';
+  }
+
+  /* 안내문 항목 (문구는 그대로 두고 {항목}만 날짜로 바뀜). g: s=정산 대상, d=마감 기한 */
+  const TOKEN_DEFS = [
+    ['정산대상기간', 's', v => fmtFull(v.start) + ' ~ ' + fmtFull(v.end)],
+    ['정산시작일', 's', v => fmtFull(v.start)], ['정산종료일', 's', v => fmtFull(v.end)],
+    ['정산시작월일', 's', v => fmtMDW(v.start)], ['정산종료월일', 's', v => fmtMDW(v.end)],
+    ['정산년월', 's', v => v.y + '년 ' + v.m + '월'], ['정산연도', 's', v => String(v.y)], ['정산월', 's', v => String(v.m)],
+    ['정산말일', 's', v => String(v.end.getDate())],
+    ['정산시작요일', 's', v => WD[v.start.getDay()]], ['정산종료요일', 's', v => WD[v.end.getDay()]],
+    ['마감기한', 'd', v => fmtFull(v.deadline)], ['마감월일', 'd', v => fmtMDW(v.deadline)],
+    ['마감연도', 'd', v => String(v.deadline.getFullYear())], ['마감월', 'd', v => String(v.deadline.getMonth() + 1)],
+    ['마감일', 'd', v => String(v.deadline.getDate())], ['마감요일', 'd', v => WD[v.deadline.getDay()]],
+  ];
+  function fillNotice(body, v) {
+    const map = {}; TOKEN_DEFS.forEach(([n, g, fn]) => { map[n] = { g, fn }; });
+    const segs = [], unknown = [], missing = [];
+    const re = /\{([^{}\r\n]*)\}/g;
+    let last = 0, m;
+    body = String(body == null ? '' : body);
+    while ((m = re.exec(body))) {
+      if (m.index > last) segs.push({ t: 'text', v: body.slice(last, m.index) });
+      const name = m[1].trim(), def = map[name];
+      if (!def) { segs.push({ t: 'tok', v: m[0], k: 'u', name }); unknown.push(m[0]); }
+      else if (def.g === 'd' && !v.deadline) { segs.push({ t: 'tok', v: m[0], k: 'x', name }); if (!missing.includes(m[0])) missing.push(m[0]); }
+      else segs.push({ t: 'tok', v: def.fn(v), k: def.g, name });
+      last = m.index + m[0].length;
+    }
+    if (last < body.length) segs.push({ t: 'text', v: body.slice(last) });
+    return { text: segs.map(x => x.v).join(''), segs, unknown, missing };
+  }
+
   function setState(s) { ctx.S = s; }
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -964,7 +1384,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'prog', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'xlsx', noticeId: 0, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -1318,6 +1738,81 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       i.value = ''; commit();
     },
     logSubs() { S.logSubs = S.logSubs === false; commit(); },
+    formTab(el) { ui.formTab = el.dataset.v; renderPanel(); },
+    stY(el) { S.settle.y = parseInt(el.value, 10); commit(); },
+    stM(el) { S.settle.m = parseInt(el.value, 10); commit(); },
+    stPrev() { const c = calcSettle(); [S.settle.y, S.settle.m] = shiftMonth(c.y, c.m, -1); commit(); },
+    stNext() { const c = calcSettle(); [S.settle.y, S.settle.m] = shiftMonth(c.y, c.m, 1); commit(); },
+    noticePick(el) { ui.noticeId = Number(el.dataset.id); renderPanel(); },
+    noticeAdd() { openNotice(0); },
+    noticeEdit(el) { openNotice(Number(el.dataset.id)); },
+    noticeDel(el) {
+      const n = S.notices.find(x => String(x.id) === el.dataset.id); if (!n) return;
+      confirmBox('"' + n.name + '" 안내문 양식을 삭제할까요?', '삭제', () => { S.notices = S.notices.filter(x => x.id !== n.id); commit(); }, () => {});
+    },
+    noticeSave(el) {
+      const name = $('#nName').value.trim(), body = $('#nBody').value, id = Number(el.dataset.id);
+      if (!name) { $('#nErr').style.color = 'var(--pink-ink)'; $('#nErr').textContent = '양식 이름을 입력해 주세요.'; return; }
+      if (!body.trim()) { $('#nErr').style.color = 'var(--pink-ink)'; $('#nErr').textContent = '안내문 내용을 입력해 주세요.'; return; }
+      const now = iso(today());
+      if (id) { const n = S.notices.find(x => x.id === id); if (n) { n.name = name; n.body = body; n.updated = now; } }
+      else { const nid = S.next_id++; S.notices.push({ id: nid, name, body, created: now, updated: now }); ui.noticeId = nid; }
+      closeModal(); commit();
+    },
+    tokIns(el) {
+      const ta = $('#nBody'); if (!ta) return;
+      const txt = '{' + el.dataset.t + '}';
+      ta.setRangeText(txt, ta.selectionStart, ta.selectionEnd, 'end'); ta.focus(); ta.dispatchEvent(new Event('input'));
+    },
+    noticeCopy(el) {
+      const n = S.notices.find(x => String(x.id) === el.dataset.id); if (!n) return;
+      const c = calcSettle(), f = L.fillNotice(n.body, c.vars);
+      if (!c.period.ok || (c.deadline && !c.dlOk) || f.missing.length || f.unknown.length) return;
+      copyText(f.text, el, '안내문 복사');
+    },
+    ruleEdit() { openRule(); },
+    ruleSave() {
+      const { r, read, g } = ruleForm; read();
+      const e = L.ruleValid(r); if (e) { g('rErr').textContent = e; return; }
+      const out = { type: r.type };
+      if (r.type === 'fixed') { out.monthOffset = parseInt(r.monthOffset, 10); out.day = r.day === 'last' ? 'last' : parseInt(r.day, 10); out.adjust = r.adjust || 'none'; }
+      else if (r.type === 'nthbiz') { out.monthOffset = parseInt(r.monthOffset, 10); out.n = parseInt(r.n, 10); }
+      else if (r.type === 'afterEnd') { out.n = parseInt(r.n, 10); out.adjust = r.adjust || 'none'; }
+      else out.n = parseInt(r.n, 10);
+      S.settle.rule = out; closeModal(); commit();
+    },
+    ruleClear() { confirmBox('마감 규칙을 삭제할까요?\n삭제하면 마감 기한은 다시 설정할 때까지 계산되지 않아요.', '삭제', () => { S.settle.rule = null; commit(); }, () => {}); },
+    manualSet() { openManual(); },
+    manualSave() {
+      const c = calcSettle(), v = $('#mDate').value, d = P(v);
+      if (!d || !L.checkDate(d)) { $('#mErr').textContent = '날짜를 선택해 주세요.'; return; }
+      S.settle.manual = { y: c.y, m: c.m, date: v }; closeModal(); commit();
+    },
+    manualClear() { S.settle.manual = null; commit(); },
+    xlsxAdd() { xlsxAdd(); },
+    xlsxRegSave() { xlsxRegSave(); },
+    xlsxUse(el) { xlsxUse(el.dataset.id); },
+    xlsxEdit(el) {
+      const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
+      openModal(() => '<h3>엑셀 양식 수정</h3><div class="form"><label>양식 이름</label><input id="xName" value="' + esc(x.name) + '">' +
+        '<label>복사할 시트</label><div class="xsheets">' + sheetBoxes(x.all, x.sheets) + '</div></div><div class="err" id="xErr"></div>' +
+        '<div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xlsxEditSave" data-id="' + x.id + '">저장</button></div>');
+    },
+    xlsxEditSave(el) {
+      const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
+      const name = $('#xName').value.trim(), sel = [...document.querySelectorAll('.xSheet')].filter(b => b.checked).map(b => b.value);
+      if (!name) { $('#xErr').textContent = '양식 이름을 입력해 주세요.'; return; }
+      if (!sel.length) { $('#xErr').textContent = '복사할 시트를 하나 이상 선택해 주세요.'; return; }
+      x.name = name; x.sheets = x.all.filter(n => sel.includes(n)); closeModal(); commit();
+    },
+    xlsxDel(el) {
+      const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
+      confirmBox('"' + x.name + '" 엑셀 양식을 삭제할까요?\n보관 중인 양식 사본도 함께 지워져요. 이미 복사해 둔 엑셀 파일에는 영향이 없어요.', '삭제', async () => {
+        try { if (hasPy()) await api().xlsx_delete(x.file); } catch (e) { /* ignore */ }
+        S.xlsx = S.xlsx.filter(q => q.id !== x.id); commit();
+      }, () => {});
+    },
+    openFolder(el) { try { if (hasPy()) api().open_folder(el.dataset.path); } catch (e) { /* ignore */ } },
     logPrev() { ui.logDate = iso(addDays(P(ui.logDate || iso(today())), -1)); renderPanel(); focusLog(); },
     logNext() { const n = iso(addDays(P(ui.logDate || iso(today())), 1)); ui.logDate = n >= iso(today()) ? '' : n; renderPanel(); focusLog(); },
     logToday() { ui.logDate = ''; renderPanel(); focusLog(); },
@@ -1514,6 +2009,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   document.addEventListener('focusout', e => {
     if (e.target.classList && e.target.classList.contains('tedit') && ui.editTodo != null) saveTodoEdit(e.target);
   });
+  document.addEventListener('change', e => {
+    const el = e.target.closest && e.target.closest('[data-chg]');
+    if (el && acts[el.dataset.chg]) acts[el.dataset.chg](el);
+  });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     if (!el) return;
@@ -1606,14 +2105,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function renderTabs() {
     const host = $('#tabs'); if (!host) return;
     const n = L.doingList().length;
-    host.innerHTML = [['prog', '진행'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['stat', '통계']].map(([k, name]) =>
+    host.innerHTML = [['prog', '진행'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['form', '양식'], ['stat', '통계']].map(([k, name]) =>
       '<button class="tab ' + (ui.tab === k ? 'active' : '') + '" data-act="tab" data-tab="' + k + '">' + name +
       (k === 'prog' ? '<span class="cnt">' + n + '</span>' : '') + '</button>').join('');
   }
   function renderPanel() {
     const p = $('#panel'); if (!p) return;
     const sc = p.scrollTop;
-    p.innerHTML = ({ prog: viewProg, all: viewAll, cal: viewCal, log: viewLog, stat: viewStats })[ui.tab]();
+    p.innerHTML = ({ prog: viewProg, all: viewAll, cal: viewCal, log: viewLog, form: viewForm, stat: viewStats })[ui.tab]();
     p.scrollTop = sc;
   }
 
@@ -1784,6 +2283,223 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
       '<textarea id="logText" class="logbox" readonly spellcheck="false">' + esc(r.text) + '</textarea>' +
       (r.count ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
+  }
+
+  /* ───────── 양식 (엑셀 양식 · 안내문 양식) ───────── */
+  const infoModal = (title, msg, extra) => openModal(() => '<h3>' + esc(title) + '</h3><p class="hint2" style="white-space:pre-line;font-size:13px;color:var(--text)">' + esc(msg) + '</p><div class="modal-actions">' + (extra || '') + '<button class="btn" data-act="mClose">닫기</button></div>');
+  const noPy = () => infoModal('사용할 수 없어요', '엑셀 양식 복사는 WorkSpace.exe 로 실행할 때만 사용할 수 있어요.');
+  function copyText(text, el, label) {
+    const ok = () => { if (!el) return; el.textContent = '복사됨 ✓'; setTimeout(() => { if (el.isConnected) el.textContent = label || '복사'; }, 1500); };
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;left:-9999px;top:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy'); ok(); } catch (e) { /* ignore */ }
+      ta.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
+  }
+
+  /* 정산 대상 월 · 마감 기한 계산 (규칙이 없으면 마감 기한은 비워 둠) */
+  function calcSettle() {
+    const t = today(), st = S.settle || {};
+    const y = st.y || t.getFullYear(), m = st.m || (t.getMonth() + 1);
+    const period = L.settlePeriod(y, m);
+    let deadline = null, source = '';
+    const man = st.manual;
+    if (man && man.y === y && man.m === m && man.date) { deadline = P(man.date); source = 'manual'; }
+    else if (st.rule && !L.ruleValid(st.rule)) { deadline = L.calcDeadline(st.rule, y, m); if (deadline) source = 'rule'; }
+    return { y, m, period, deadline, source, dlOk: deadline ? L.checkDate(deadline) : null,
+      vars: { y, m, start: period.start, end: period.end, deadline } };
+  }
+
+  function viewForm() {
+    const seg = '<div class="seg segsm">' + [['xlsx', '엑셀 양식'], ['notice', '안내문 양식']].map(([v, n]) =>
+      '<button type="button" class="' + (ui.formTab === v ? 'on' : '') + '" data-act="formTab" data-v="' + v + '">' + n + '</button>').join('') + '</div>';
+    return '<div class="sec-head"><div><h2>양식</h2><div class="sub">자주 쓰는 엑셀 양식과 안내문 양식을 등록해 두고 바로 써요 · 모든 처리는 이 PC 안에서만 이뤄져요</div></div>' + seg + '</div>' +
+      (ui.formTab === 'notice' ? viewNotice() : viewXlsx());
+  }
+
+  function viewXlsx() {
+    const list = S.xlsx || [];
+    let h = '<div class="fm-bar"><button class="btn primary" data-act="xlsxAdd">＋ 엑셀 양식 등록</button>' +
+      '<span class="fm-note">엑셀을 열지 않고, 선택한 엑셀 파일의 맨 뒤에 양식 시트를 추가해요 · 복사 전에 원본을 자동으로 백업해요</span></div>';
+    if (!list.length) return h + '<div class="empty"><div><b>등록된 엑셀 양식이 없어요</b>자주 쓰는 양식 파일을 등록해 두면 버튼 한 번으로 다른 엑셀 파일에 복사할 수 있어요</div></div>';
+    h += '<div class="fm-list">';
+    for (const x of list) {
+      h += '<div class="fm-card"><div class="fm-ic">XLSX</div><div class="fm-main"><b>' + esc(x.name) + '</b>' +
+        '<div class="fm-sub">복사할 시트 ' + x.sheets.length + '개: ' + esc(x.sheets.join(', ')) + (x.all.length > x.sheets.length ? ' (전체 ' + x.all.length + '개 중)' : '') + ' · 등록 ' + esc(x.added) + '</div></div>' +
+        '<button class="btn primary" data-act="xlsxUse" data-id="' + x.id + '">엑셀 파일에 복사</button><button class="btn" data-act="xlsxEdit" data-id="' + x.id + '">수정</button>' +
+        '<button class="xb" data-act="xlsxDel" data-id="' + x.id + '" title="삭제">✕</button></div>';
+    }
+    return h + '</div>';
+  }
+
+  function viewNotice() {
+    const c = calcSettle(), t = today(), p = c.period;
+    const y0 = Math.min(t.getFullYear() - 6, c.y), y1 = Math.max(t.getFullYear() + 4, c.y);
+    let yo = '', mo = '';
+    for (let y = y0; y <= y1; y++) yo += '<option value="' + y + '"' + (y === c.y ? ' selected' : '') + '>' + y + '년</option>';
+    for (let m = 1; m <= 12; m++) mo += '<option value="' + m + '"' + (m === c.m ? ' selected' : '') + '>' + m + '월</option>';
+    let h = '<div class="fm-sel"><span class="fm-lab">정산 대상</span><button class="btn" data-act="stPrev">‹</button><select data-chg="stY">' + yo + '</select><select data-chg="stM">' + mo + '</select>' +
+      '<button class="btn" data-act="stNext">›</button><span class="fm-hint">정산 대상 연도·월을 고르면 기간이 자동으로 계산돼요</span></div>';
+    /* 정산 대상 기간 */
+    h += '<div class="fm-calc"><div class="fm-box s"><div class="fm-bt"><span class="fm-badge s">정산 대상</span><span class="fm-bm">' + c.y + '년 ' + c.m + '월분</span></div>' +
+      '<div class="fm-k">정산 대상 기간</div><div class="fm-big">' + L.fmtFull(p.start) + ' ~ ' + L.fmtFull(p.end) + '</div>' +
+      '<div class="fm-chk ' + (p.ok ? 'ok' : 'bad') + '">' + (p.ok ? '✓ 날짜·요일 검증 완료 (시작일 1일 · 종료일 ' + p.end.getDate() + '일 말일)' : '⚠ 날짜·요일이 맞지 않아요. 이 기간은 사용하지 마세요') + '</div></div>';
+    /* 마감 기한 */
+    const rule = S.settle && S.settle.rule;
+    if (c.deadline) {
+      const dm = c.deadline.getFullYear() * 12 + c.deadline.getMonth(), diff = dm !== c.y * 12 + c.m - 1;
+      h += '<div class="fm-box d"><div class="fm-bt"><span class="fm-badge d">마감 기한</span><span class="fm-bm">' + (c.source === 'manual' ? '이번만 직접 지정' : '설정한 규칙으로 계산') + '</span></div>' +
+        '<div class="fm-k">마감 기한</div><div class="fm-big">' + L.fmtFull(c.deadline) + '</div>' +
+        '<div class="fm-chk ' + (c.dlOk ? 'ok' : 'bad') + '">' + (c.dlOk ? '✓ 날짜·요일 검증 완료' : '⚠ 날짜·요일이 맞지 않아요') + '</div>' +
+        (c.source === 'rule' ? '<div class="fm-rule">규칙: ' + esc(L.describeRule(rule)) + '</div>' : '') +
+        (diff ? '<div class="fm-diff">※ 정산 대상 월(' + c.m + '월)과 마감 기한의 월(' + (c.deadline.getMonth() + 1) + '월)은 달라요</div>' : '') +
+        '<div class="fm-acts"><button class="btn" data-act="ruleEdit">마감 규칙 변경</button><button class="btn" data-act="manualSet">이번만 직접 지정</button>' +
+        (c.source === 'manual' ? '<button class="btn" data-act="manualClear">직접 지정 해제</button>' : '') + '</div></div></div>';
+    } else {
+      h += '<div class="fm-box d unset"><div class="fm-bt"><span class="fm-badge d">마감 기한</span><span class="fm-bm">규칙 미설정</span></div>' +
+        '<div class="fm-k">마감 기한</div><div class="fm-big muted">아직 정해지지 않았어요</div>' +
+        '<div class="fm-rule">' + (rule ? '저장된 마감 규칙이 올바르지 않아요. 다시 설정해 주세요.' : '마감 규칙이 아직 설정되지 않아서 날짜를 임의로 정하지 않았어요. 마감 규칙을 설정해 주세요.') + '</div>' +
+        '<div class="fm-acts"><button class="btn primary" data-act="ruleEdit">마감 규칙 설정</button><button class="btn" data-act="manualSet">이번만 직접 지정</button></div></div></div>';
+    }
+    /* 안내문 양식 목록 + 미리보기 */
+    const list = S.notices || [];
+    if (!list.some(n => n.id === ui.noticeId)) ui.noticeId = list.length ? list[0].id : 0;
+    const cur = list.find(n => n.id === ui.noticeId);
+    h += '<div class="fm-nbar"><span class="fm-lab">안내문 양식</span>' +
+      list.map(n => '<button class="chip ' + (n.id === ui.noticeId ? 'on' : '') + '" data-act="noticePick" data-id="' + n.id + '">' + esc(n.name) + '</button>').join('') +
+      '<button class="chip" data-act="noticeAdd">＋ 안내문 양식 등록</button></div>';
+    if (!cur) return h + '<div class="empty" style="min-height:170px"><div><b>등록된 안내문 양식이 없어요</b>자주 쓰는 안내문을 등록해 두면 날짜만 자동으로 채워서 바로 복사할 수 있어요</div></div>';
+    const f = L.fillNotice(cur.body, c.vars), blockers = [];
+    if (!p.ok) blockers.push('정산 대상 기간 검증에 실패했어요.');
+    if (c.deadline && !c.dlOk) blockers.push('마감 기한의 날짜·요일 검증에 실패했어요.');
+    if (f.missing.length) blockers.push('이 안내문에는 마감 기한 항목(' + f.missing.join(', ') + ')이 있어요. 마감 규칙을 설정하거나 이번만 직접 지정해 주세요.');
+    if (f.unknown.length) blockers.push('알 수 없는 항목이 있어요: ' + f.unknown.join(', ') + ' · 양식을 수정해 주세요.');
+    const prev = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
+    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark></span><span class="sp"></span>' +
+      '<button class="btn primary" data-act="noticeCopy" data-id="' + cur.id + '"' + (blockers.length ? ' disabled' : '') + '>안내문 복사</button>' +
+      '<button class="btn" data-act="noticeEdit" data-id="' + cur.id + '">수정</button><button class="btn danger" data-act="noticeDel" data-id="' + cur.id + '">삭제</button></div>' +
+      (blockers.length ? '<div class="fm-block">' + blockers.map(b => '<div>⚠ ' + esc(b) + '</div>').join('') + '</div>' : '') +
+      '<div class="fm-preview" id="noticePrev">' + prev + '</div>';
+    return h;
+  }
+
+  /* 안내문 양식 등록/수정 */
+  function openNotice(id) {
+    const n = id ? S.notices.find(x => x.id === id) : null;
+    const tb = g => L.TOKEN_DEFS.filter(d => d[1] === g).map(d => '<button type="button" class="chip tkb tkb-' + g + '" data-act="tokIns" data-t="' + d[0] + '">{' + d[0] + '}</button>').join('');
+    const M = openModal(() => '<h3>' + (n ? '안내문 양식 수정' : '안내문 양식 등록') + '</h3><div class="form">' +
+      '<label>양식 이름</label><input id="nName" value="' + esc(n ? n.name : '') + '" placeholder="예: 월 정산 자료 제출 안내">' +
+      '<label>안내문 내용 (줄바꿈·띄어쓰기가 그대로 저장돼요)</label><textarea id="nBody" class="fm-body" spellcheck="false" placeholder="예)&#10;안녕하세요.&#10;&#10;정산 대상 기간: {정산대상기간}&#10;제출 기한: {마감기한}&#10;&#10;감사합니다.">' + esc(n ? n.body : '') + '</textarea>' +
+      '<label>날짜 항목 넣기 (누르면 커서 위치에 들어가요)</label><div class="tkbar"><div class="tkrow"><span class="tkl s">정산 대상</span>' + tb('s') + '</div>' +
+      '<div class="tkrow"><span class="tkl d">마감 기한</span>' + tb('d') + '</div></div>' +
+      '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
+      '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
+    M.el.style.width = 'min(720px,100%)';
+    const known = new Set(L.TOKEN_DEFS.map(d => d[0]));
+    const check = () => {
+      const bad = []; (M.el.querySelector('#nBody').value.match(/\{([^{}\r\n]*)\}/g) || []).forEach(t => { if (!known.has(t.slice(1, -1).trim())) bad.push(t); });
+      const e = M.el.querySelector('#nErr'); e.style.color = bad.length ? 'var(--pink-ink)' : ''; e.textContent = bad.length ? '알 수 없는 항목: ' + bad.join(', ') + ' (아래 항목 버튼에서 골라 넣어 주세요)' : '';
+    };
+    M.el.querySelector('#nBody').addEventListener('input', check); check();
+    setTimeout(() => { const i = M.el.querySelector('#nName'); if (i) i.focus(); }, 0);
+  }
+
+  /* 마감 규칙 설정 (사용자가 직접 정함 · 나중에 변경 가능) */
+  let ruleForm = null;
+  function openRule() {
+    const c = calcSettle();
+    const cur = S.settle.rule && !L.ruleValid(S.settle.rule) ? JSON.parse(JSON.stringify(S.settle.rule)) : null;
+    const r = cur || { type: 'fixed', monthOffset: '', day: '', n: '', adjust: 'none' };
+    const v = x => (x == null ? '' : x);
+    const M = openModal(() => '<h3>마감 규칙 설정</h3><p class="hint2">정산 대상 월을 기준으로 마감 기한을 계산하는 규칙이에요. 한 번 정해 두면 월마다 자동으로 계산하고, 언제든 바꿀 수 있어요.</p>' +
+      '<div class="form"><label>규칙 종류</label><select id="rType">' + Object.entries(L.RULE_TYPES).map(([k, n]) => '<option value="' + k + '"' + (r.type === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select><div id="rFields"></div></div>' +
+      '<div class="rex" id="rEx"></div><div class="err" id="rErr"></div><div class="modal-actions">' + (cur ? '<button class="btn danger" data-act="ruleClear" style="margin-right:auto">규칙 삭제</button>' : '') +
+      '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="ruleSave">저장</button></div>');
+    const g = id => M.el.querySelector('#' + id);
+    const read = () => {
+      if (g('rOff')) r.monthOffset = g('rOff').value;
+      if (g('rLast')) r.day = g('rLast').checked ? 'last' : (g('rDay') ? g('rDay').value : r.day);
+      if (g('rN')) r.n = g('rN').value;
+      if (g('rAdj')) r.adjust = g('rAdj').value;
+    };
+    const adjSel = () => '<label>마감 날짜가 주말·공휴일이면</label><select id="rAdj">' + Object.entries(L.ADJUSTS).map(([k, n]) => '<option value="' + k + '"' + ((r.adjust || 'none') === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>';
+    const off = () => '<label>정산 대상 월로부터 몇 개월 뒤인가요? (0 = 정산 대상 월 당월, 1 = 다음 달)</label><input id="rOff" type="number" min="0" max="24" value="' + v(r.monthOffset) + '">';
+    const paint = () => {
+      let h = '';
+      if (r.type === 'fixed') h = off() + '<label>날짜 (일)</label><div class="rrow"><input id="rDay" type="number" min="1" max="31" value="' + (r.day === 'last' ? '' : v(r.day)) + '"' + (r.day === 'last' ? ' disabled' : '') + '>' +
+        '<label class="chkline"><input id="rLast" type="checkbox"' + (r.day === 'last' ? ' checked' : '') + '>말일</label></div>' + adjSel();
+      else if (r.type === 'nthbiz') h = off() + '<label>몇 번째 영업일인가요?</label><input id="rN" type="number" min="1" max="23" value="' + v(r.n) + '">';
+      else if (r.type === 'afterEnd') h = '<label>정산 종료일로부터 며칠 뒤인가요? (달력 기준 일수)</label><input id="rN" type="number" min="0" max="90" value="' + v(r.n) + '">' + adjSel();
+      else h = '<label>정산 종료일로부터 몇 영업일 뒤인가요?</label><input id="rN" type="number" min="1" max="60" value="' + v(r.n) + '">';
+      g('rFields').innerHTML = h;
+    };
+    const update = () => {
+      const ex = g('rEx'), e = L.ruleValid(r);
+      if (e) { ex.innerHTML = '<span class="muted">값을 모두 입력하면 ' + c.y + '년 ' + c.m + '월분 예시가 여기에 보여요</span>'; return; }
+      const d = L.calcDeadline(r, c.y, c.m);
+      ex.innerHTML = '예) 정산 대상 <b>' + c.y + '년 ' + c.m + '월분</b> → 마감 기한 <b>' + L.fmtFull(d) + '</b>';
+    };
+    ruleForm = { r, read, g };
+    paint(); update();
+    M.el.addEventListener('input', () => { read(); update(); });
+    M.el.addEventListener('change', e => {
+      read();
+      if (e.target.id === 'rType') { r.type = e.target.value; paint(); }
+      else if (e.target.id === 'rLast') paint();
+      update();
+    });
+  }
+
+  function openManual() {
+    const c = calcSettle();
+    openModal(() => '<h3>마감 기한 직접 지정</h3><p class="hint2">' + c.y + '년 ' + c.m + '월분에만 적용돼요. 정산 대상 월을 바꾸면 설정한 마감 규칙이 다시 적용돼요.</p>' +
+      '<div class="form"><label>마감 기한</label><input id="mDate" type="date" value="' + (c.deadline ? iso(c.deadline) : '') + '"></div><div class="err" id="mErr"></div>' +
+      '<div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="manualSave">적용</button></div>');
+  }
+
+  /* 엑셀 양식: 등록 · 복사 · 수정 · 삭제 */
+  let xinfo = null;
+  const sheetBoxes = (all, sel) => all.map(n => '<label class="chkline"><input type="checkbox" class="xSheet" value="' + esc(n) + '"' + (sel.includes(n) ? ' checked' : '') + '>' + esc(n) + '</label>').join('');
+  const warnBox = w => (w && w.length ? '<div class="fm-block" style="margin:8px 0 0">' + w.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '');
+  async function xlsxAdd() {
+    if (!hasPy()) return noPy();
+    let r; try { r = await api().xlsx_pick_template(); } catch (e) { r = { ok: false, message: '파일을 선택하지 못했어요.' }; }
+    if (!r || r.cancelled) return;
+    if (!r.ok) return infoModal('등록할 수 없어요', r.message);
+    xinfo = r;
+    openModal(() => '<h3>엑셀 양식 등록</h3><div class="form"><label>양식 이름</label><input id="xName" value="' + esc(r.name) + '">' +
+      '<label>복사할 시트 (선택한 시트만 복사돼요)</label><div class="xsheets">' + sheetBoxes(r.sheets, r.sheets) + '</div></div>' + warnBox(r.warnings) +
+      '<div class="hint" style="margin-top:8px">선택한 파일은 이 프로그램 폴더(workspace_templates)에 사본으로 보관해서, 원본을 옮기거나 지워도 계속 쓸 수 있어요.</div>' +
+      '<div class="err" id="xErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xlsxRegSave">등록</button></div>');
+  }
+  async function xlsxRegSave() {
+    const name = $('#xName').value.trim(), sel = [...document.querySelectorAll('.xSheet')].filter(b => b.checked).map(b => b.value);
+    const err = m => { $('#xErr').textContent = m; };
+    if (!name) return err('양식 이름을 입력해 주세요.');
+    if (!sel.length) return err('복사할 시트를 하나 이상 선택해 주세요.');
+    $('#xErr').textContent = '';
+    let res; try { res = await api().xlsx_register(xinfo.path); } catch (e) { res = { ok: false, message: '등록 중 문제가 생겼어요.' }; }
+    if (!res.ok) return err(res.message);
+    S.xlsx.push({ id: S.next_id++, name, file: res.file, size: res.size || 0, all: xinfo.sheets, sheets: sel, added: iso(today()) });
+    closeModal(); commit();
+  }
+  async function xlsxUse(id) {
+    const x = (S.xlsx || []).find(q => String(q.id) === String(id)); if (!x) return;
+    if (!hasPy()) return noPy();
+    let r; try { r = await api().xlsx_pick_target(); } catch (e) { r = { ok: false, message: '파일을 선택하지 못했어요.' }; }
+    if (!r || r.cancelled) return;
+    if (!r.ok) return infoModal('복사할 수 없어요', r.message);
+    const go = async () => {
+      openModal(() => '<h3>복사하는 중…</h3><p class="hint2">원본을 백업한 뒤 양식을 복사하고 있어요. 잠시만 기다려 주세요.</p>');
+      let res; try { res = await api().xlsx_copy(x.file, x.sheets, r.path); } catch (e) { res = { ok: false, message: '복사 중 문제가 생겼어요.' }; }
+      if (res.ok) infoModal('양식 복사 완료', res.message, '<button class="btn" data-act="openFolder" data-path="' + esc(r.path) + '">파일 폴더 열기</button>');
+      else infoModal('복사하지 못했어요', res.message);
+    };
+    if (r.warnings && r.warnings.length) confirmBox('이 엑셀 파일에는 복사하면서 사라질 수 있는 요소가 있어요.\n\n' + r.warnings.map(w => '• ' + w).join('\n') + '\n\n원본은 자동으로 백업돼요. 그래도 진행할까요?', '진행', go, () => {});
+    else await go();
   }
 
   /* 통계 */
@@ -2021,6 +2737,58 @@ class Api:
     def toggle_mini(self):
         self._core.show_mini(not self._core.mini_visible)
         return True
+
+
+    # ── 엑셀 양식 (엑셀을 실행하지 않고 파일을 직접 편집) ──
+    def _xlsx_dialog(self):
+        w = self._core.windows.get("main")
+        try:
+            kind = webview.FileDialog.OPEN
+        except AttributeError:
+            kind = webview.OPEN_DIALOG
+        res = w.create_file_dialog(kind, allow_multiple=False, file_types=("Excel 파일 (*.xlsx;*.xlsm)",))
+        if not res:
+            return None
+        return res if isinstance(res, str) else res[0]
+
+    def xlsx_pick_template(self):
+        path = self._xlsx_dialog()
+        return {"ok": False, "cancelled": True} if not path else xlsx_inspect(path, "template")
+
+    def xlsx_register(self, path):
+        info = xlsx_inspect(path, "template")
+        if not info["ok"]:
+            return info
+        os.makedirs(TEMPLATE_DIR, exist_ok=True)
+        name = "%s_%s%s" % (_dt.datetime.now().strftime("%Y%m%d%H%M%S"), uuid.uuid4().hex[:6], os.path.splitext(info["path"])[1].lower())
+        dest = os.path.join(TEMPLATE_DIR, name)
+        try:
+            shutil.copy2(info["path"], dest)
+        except OSError as e:
+            return {"ok": False, "message": "양식 파일을 보관하지 못했어요: %s" % e}
+        return {"ok": True, "file": name, "size": os.path.getsize(dest)}
+
+    def xlsx_delete(self, file):
+        try:
+            os.remove(os.path.join(TEMPLATE_DIR, os.path.basename(file or "")))
+        except OSError:
+            pass
+        return True
+
+    def xlsx_pick_target(self):
+        path = self._xlsx_dialog()
+        return {"ok": False, "cancelled": True} if not path else xlsx_inspect(path, "target")
+
+    def xlsx_copy(self, file, sheets, target):
+        return xlsx_copy(file, sheets, target)
+
+    def open_folder(self, path):
+        try:
+            if os.name == "nt":
+                subprocess.Popen(["explorer", "/select,", os.path.abspath(path)])
+            return True
+        except Exception:
+            return False
 
     def get_config(self):
         c = load_config()
