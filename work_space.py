@@ -913,6 +913,11 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 .rex{margin:12px 0 2px;padding:10px 12px;background:#f7f6fb;border-radius:12px;font-size:13px;line-height:1.6}
 .rex .muted{color:var(--muted)}
 .xsheets{display:grid;gap:4px;max-height:180px;overflow:auto;padding:8px 10px;border:1px solid var(--line);border-radius:12px}
+
+/* 양식 탭: 화면 높이에 맞춰 줄어들지 않고 내용 길이만큼 늘어나게 (넘치면 패널이 스크롤) */
+.fm-bar,.fm-list,.fm-card,.fm-sel,.fm-calc,.fm-box,.fm-nbar,.fm-phead,.fm-block,.fm-preview{flex:none}
+.fm-preview{min-height:140px;height:auto;overflow:visible}
+.fm-preview:last-child{margin-bottom:6px}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
