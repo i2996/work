@@ -11,6 +11,7 @@ WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불�
 - 화면은 Windows 내장 웹뷰(WebView2)로 그려집니다.
 """
 import datetime as _dt
+import html as _html
 import io
 import json
 import os
@@ -274,7 +275,7 @@ def xlsx_inspect(path, kind):
     if kind == "target":
         lock = os.path.join(os.path.dirname(path), "~$" + os.path.basename(path))
         if os.path.exists(lock):
-            return {"ok": False, "message": "이 파일이 엑셀에서 열려 있는 것 같아요. 파일을 닫은 뒤 다시 시도해 주세요."}
+            return {"ok": False, "message": "이 파일이 엑셀에서 열려 있는 것 같아요. 파일을 닫은 뒤 다시 시도하거나, 닫지 않고 쓰려면 '열린 엑셀용 복사'로 붙여넣어 주세요."}
     try:
         found, macro = _scan_features(path)
         wb = openpyxl.load_workbook(path, read_only=True)
@@ -441,7 +442,7 @@ def xlsx_copy(template_file, sheets, target):
             raise IOError("저장 결과를 확인하지 못했어요")
         os.replace(tmp, target)   # 엑셀에서 열려 있으면 여기서 PermissionError
     except PermissionError:
-        return {"ok": False, "message": "파일을 저장할 수 없어요. 엑셀에서 열려 있다면 닫은 뒤 다시 시도해 주세요. (원본은 그대로예요)"}
+        return {"ok": False, "message": "파일을 저장할 수 없어요. 엑셀에서 열려 있다면 닫은 뒤 다시 시도하거나, 닫지 않고 쓰려면 '열린 엑셀용 복사'를 이용해 주세요. (원본은 그대로예요)"}
     except Exception as e:
         return {"ok": False, "message": "복사하지 못했어요: %s\n(원본은 그대로예요)" % e}
     finally:
@@ -452,6 +453,157 @@ def xlsx_copy(template_file, sheets, target):
             pass
     return {"ok": True, "added": added, "target": target, "backup": backup,
             "message": "'%s' 파일 맨 뒤에 시트 %d개를 추가했어요.\n추가한 시트: %s\n\n원본 백업: %s" % (os.path.basename(target), len(added), ", ".join(added), backup)}
+
+
+# ── 열려 있는 엑셀에 붙여넣기용: 양식의 위쪽 몇 행을 서식 그대로 HTML/텍스트로 만들어 클립보드에 복사 ──
+_THEME_RGB = ["FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47"]
+_BORDER_CSS = {"thin": "1px solid", "medium": "2px solid", "thick": "3px solid", "dashed": "1px dashed", "mediumDashed": "2px dashed",
+               "dotted": "1px dotted", "hair": "1px dotted", "double": "3px double", "dashDot": "1px dashed", "dashDotDot": "1px dashed",
+               "slantDashDot": "1px dashed", "mediumDashDot": "2px dashed", "mediumDashDotDot": "2px dashed"}
+
+
+def _color_hex(c):
+    """openpyxl 색상 → '#RRGGBB' (알 수 없으면 None)."""
+    try:
+        if c is None:
+            return None
+        rgb = None
+        if c.type == "rgb" and isinstance(c.rgb, str) and len(c.rgb) == 8:
+            rgb = c.rgb[2:]
+        elif c.type == "theme" and c.theme is not None and c.theme < len(_THEME_RGB):
+            rgb = _THEME_RGB[c.theme]
+        elif c.type == "indexed" and c.indexed is not None:
+            from openpyxl.styles.colors import COLOR_INDEX
+            if c.indexed < len(COLOR_INDEX):
+                rgb = COLOR_INDEX[c.indexed][2:]
+        if not rgb:
+            return None
+        tint = getattr(c, "tint", 0) or 0
+        if tint and c.type == "theme":
+            vals = [int(rgb[i:i + 2], 16) for i in (0, 2, 4)]
+            vals = [round(v + (255 - v) * tint) if tint > 0 else round(v * (1 + tint)) for v in vals]
+            rgb = "".join("%02X" % max(0, min(255, v)) for v in vals)
+        return "#" + rgb
+    except Exception:
+        return None
+
+
+def _cell_text(v):
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, _dt.datetime):
+        return v.strftime("%Y-%m-%d") if (v.hour, v.minute, v.second) == (0, 0, 0) else v.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, _dt.date):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, float) and v == v and abs(v) < 1e15 and v == int(v):
+        return str(int(v))
+    if hasattr(v, "text"):
+        return str(v.text)
+    return str(v)
+
+
+def xlsx_rows_html(template_file, sheet, rows):
+    """등록한 양식에서 위쪽 rows 행을 서식 그대로 표(HTML)와 탭 구분 텍스트로 만들어 돌려줌."""
+    if openpyxl is None:
+        return {"ok": False, "message": "엑셀 처리 라이브러리(openpyxl)를 찾지 못했어요. 프로그램을 최신 버전으로 업데이트해 주세요."}
+    tpl = os.path.join(TEMPLATE_DIR, os.path.basename(template_file or ""))
+    if not os.path.isfile(tpl):
+        return {"ok": False, "message": "보관 중인 양식 파일을 찾을 수 없어요. 양식을 삭제한 뒤 다시 등록해 주세요."}
+    try:
+        n = max(1, min(int(rows), 200))
+    except (TypeError, ValueError):
+        n = 1
+    try:
+        wb = openpyxl.load_workbook(tpl)
+    except Exception as e:
+        return {"ok": False, "message": "양식 파일을 읽지 못했어요: %s" % e}
+    if sheet not in wb.sheetnames:
+        return {"ok": False, "message": "양식에서 '%s' 시트를 찾지 못했어요." % sheet}
+    ws = wb[sheet]
+    n = min(n, max(ws.max_row, 1))
+    max_col = 1
+    for row in ws.iter_rows(min_row=1, max_row=n):
+        for c in row:
+            b = c.border
+            if c.value is not None or (c.has_style and (c.fill.fill_type or b.left.style or b.right.style or b.top.style or b.bottom.style)):
+                max_col = max(max_col, c.column)
+    spans, covered = {}, set()
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row > n:
+            continue
+        max_col = max(max_col, rng.max_col)
+    max_col = min(max_col, 100)
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row > n or rng.min_col > max_col:
+            continue
+        r2, c2 = min(rng.max_row, n), min(rng.max_col, max_col)
+        spans[(rng.min_row, rng.min_col)] = (r2 - rng.min_row + 1, c2 - rng.min_col + 1)
+        for r in range(rng.min_row, r2 + 1):
+            for c in range(rng.min_col, c2 + 1):
+                if (r, c) != (rng.min_row, rng.min_col):
+                    covered.add((r, c))
+
+    def col_w(i):
+        for dim in ws.column_dimensions.values():
+            if dim.min and dim.max and dim.min <= i <= dim.max and dim.width:
+                return dim.width
+        return ws.sheet_format.defaultColWidth or 8.43
+
+    html_rows, text_rows = [], []
+    for r in range(1, n + 1):
+        h = ws.row_dimensions[r].height or ws.sheet_format.defaultRowHeight or 15
+        tds, texts = [], []
+        for c in range(1, max_col + 1):
+            if (r, c) in covered:
+                texts.append("")
+                continue
+            cell = ws.cell(row=r, column=c)
+            txt = _cell_text(cell.value)
+            texts.append(txt.replace("\t", " ").replace("\r", " ").replace("\n", " "))
+            st = []
+            if cell.has_style:
+                f, a, b = cell.font, cell.alignment, cell.border
+                if f.name:
+                    st.append("font-family:'%s'" % f.name.replace("'", ""))
+                if f.sz:
+                    st.append("font-size:%spt" % f.sz)
+                if f.b:
+                    st.append("font-weight:700")
+                if f.i:
+                    st.append("font-style:italic")
+                if f.u:
+                    st.append("text-decoration:underline")
+                col = _color_hex(f.color)
+                if col:
+                    st.append("color:%s" % col)
+                if cell.fill.fill_type == "solid":
+                    bg = _color_hex(cell.fill.fgColor)
+                    if bg:
+                        st.append("background:%s" % bg)
+                if a.horizontal in ("left", "center", "right", "justify"):
+                    st.append("text-align:%s" % a.horizontal)
+                elif a.horizontal == "centerContinuous":
+                    st.append("text-align:center")
+                if a.vertical:
+                    st.append("vertical-align:%s" % {"center": "middle"}.get(a.vertical, a.vertical if a.vertical in ("top", "bottom") else "middle"))
+                for side, name in ((b.left, "left"), (b.right, "right"), (b.top, "top"), (b.bottom, "bottom")):
+                    if side is not None and side.style in _BORDER_CSS:
+                        st.append("border-%s:%s %s" % (name, _BORDER_CSS[side.style], _color_hex(side.color) or "#000000"))
+                st.append("white-space:normal" if a.wrap_text else "white-space:nowrap")
+            else:
+                st.append("white-space:nowrap")
+            attrs = ""
+            if (r, c) in spans:
+                rs, cs = spans[(r, c)]
+                attrs = (' rowspan="%d"' % rs if rs > 1 else "") + (' colspan="%d"' % cs if cs > 1 else "")
+            tds.append("<td%s style=\"%s\">%s</td>" % (attrs, _html.escape(";".join(st), quote=True), _html.escape(txt).replace("\n", "<br>")))
+        html_rows.append("<tr style=\"height:%spt\">%s</tr>" % (h, "".join(tds)))
+        text_rows.append("\t".join(texts))
+    cols = "".join("<col style=\"width:%dpx\">" % int(col_w(i) * 7 + 5) for i in range(1, max_col + 1))
+    table = "<table border=\"0\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;table-layout:fixed\"><colgroup>%s</colgroup>%s</table>" % (cols, "".join(html_rows))
+    return {"ok": True, "html": table, "text": "\n".join(text_rows), "rows": n, "cols": max_col, "sheet": sheet}
 
 
 MINI_TITLE = APP_TITLE + " MINI"
@@ -918,6 +1070,9 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 .fm-bar,.fm-list,.fm-card,.fm-sel,.fm-calc,.fm-box,.fm-nbar,.fm-phead,.fm-block,.fm-preview{flex:none}
 .fm-preview{min-height:140px;height:auto;overflow:visible}
 .fm-preview:last-child{margin-bottom:6px}
+
+.fm-card .btn{white-space:nowrap}
+.fm-note b{color:var(--accent-ink)}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -1797,6 +1952,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     xlsxAdd() { xlsxAdd(); },
     xlsxRegSave() { xlsxRegSave(); },
     xlsxUse(el) { xlsxUse(el.dataset.id); },
+    xlsxClip(el) { xlsxClip(el.dataset.id); },
+    clipRows(el) { $('#cRows').value = el.dataset.n; },
+    clipGo(el) { clipGo(el.dataset.id); },
     xlsxEdit(el) {
       const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
       openModal(() => '<h3>엑셀 양식 수정</h3><div class="form"><label>양식 이름</label><input id="xName" value="' + esc(x.name) + '">' +
@@ -2305,6 +2463,19 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
   }
 
+  /* 서식이 있는 표(HTML)를 클립보드에 복사 → 엑셀에 붙여넣으면 서식째 들어가요 */
+  function copyRich(html) {
+    const host = document.createElement('div');
+    host.contentEditable = 'true';
+    host.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;background:#fff';
+    host.innerHTML = html; document.body.appendChild(host);
+    const rg = document.createRange(); rg.selectNodeContents(host);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    sel.removeAllRanges(); host.remove();
+    return ok;
+  }
+
   /* 정산 대상 월 · 마감 기한 계산 (규칙이 없으면 마감 기한은 비워 둠) */
   function calcSettle() {
     const t = today(), st = S.settle || {};
@@ -2328,13 +2499,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function viewXlsx() {
     const list = S.xlsx || [];
     let h = '<div class="fm-bar"><button class="btn primary" data-act="xlsxAdd">＋ 엑셀 양식 등록</button>' +
-      '<span class="fm-note">엑셀을 열지 않고, 선택한 엑셀 파일의 맨 뒤에 양식 시트를 추가해요 · 복사 전에 원본을 자동으로 백업해요</span></div>';
+      '<span class="fm-note">엑셀을 열지 않고 선택한 파일의 맨 뒤에 양식 시트를 추가해요 (복사 전 자동 백업) · 파일이 열려 있다면 <b>열린 엑셀용 복사</b>로 첫 행만 복사해 붙여넣을 수 있어요</span></div>';
     if (!list.length) return h + '<div class="empty"><div><b>등록된 엑셀 양식이 없어요</b>자주 쓰는 양식 파일을 등록해 두면 버튼 한 번으로 다른 엑셀 파일에 복사할 수 있어요</div></div>';
     h += '<div class="fm-list">';
     for (const x of list) {
       h += '<div class="fm-card"><div class="fm-ic">XLSX</div><div class="fm-main"><b>' + esc(x.name) + '</b>' +
         '<div class="fm-sub">복사할 시트 ' + x.sheets.length + '개: ' + esc(x.sheets.join(', ')) + (x.all.length > x.sheets.length ? ' (전체 ' + x.all.length + '개 중)' : '') + ' · 등록 ' + esc(x.added) + '</div></div>' +
-        '<button class="btn primary" data-act="xlsxUse" data-id="' + x.id + '">엑셀 파일에 복사</button><button class="btn" data-act="xlsxEdit" data-id="' + x.id + '">수정</button>' +
+        '<button class="btn primary" data-act="xlsxUse" data-id="' + x.id + '">엑셀 파일에 복사</button>' +
+        '<button class="btn" data-act="xlsxClip" data-id="' + x.id + '" title="엑셀 파일을 닫지 않고, 양식의 첫 행 등을 붙여넣기용으로 복사해요">열린 엑셀용 복사</button><button class="btn" data-act="xlsxEdit" data-id="' + x.id + '">수정</button>' +
         '<button class="xb" data-act="xlsxDel" data-id="' + x.id + '" title="삭제">✕</button></div>';
     }
     return h + '</div>';
@@ -2490,6 +2662,25 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!res.ok) return err(res.message);
     S.xlsx.push({ id: S.next_id++, name, file: res.file, size: res.size || 0, all: xinfo.sheets, sheets: sel, added: iso(today()) });
     closeModal(); commit();
+  }
+  function xlsxClip(id) {
+    const x = (S.xlsx || []).find(q => String(q.id) === String(id)); if (!x) return;
+    if (!hasPy()) return noPy();
+    openModal(() => '<h3>열려 있는 엑셀에 붙여넣기용 복사</h3>' +
+      '<p class="hint2">엑셀 파일을 닫지 않아도 돼요. 양식의 위쪽 행을 서식째 복사해 두면, 열려 있는 엑셀에서 붙여넣을 칸을 누르고 <b>Ctrl+V</b>로 붙여넣을 수 있어요.</p>' +
+      '<div class="form"><label>복사할 시트</label><select id="cSheet">' + x.sheets.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('') + '</select>' +
+      '<label>위에서부터 몇 행을 복사할까요?</label><div class="rrow"><input id="cRows" type="number" min="1" max="200" value="1">' +
+      '<button class="btn" data-act="clipRows" data-n="1">첫 행만</button><button class="btn" data-act="clipRows" data-n="3">3행</button><button class="btn" data-act="clipRows" data-n="200">전체</button></div></div>' +
+      '<div class="err" id="cMsg"></div><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button><button class="btn primary" data-act="clipGo" data-id="' + x.id + '">클립보드로 복사</button></div>');
+  }
+  async function clipGo(id) {
+    const x = (S.xlsx || []).find(q => String(q.id) === String(id)); if (!x) return;
+    const msg = (t, bad) => { const m = $('#cMsg'); if (m) { m.style.color = bad ? '' : 'var(--accent-ink)'; m.textContent = t; } };
+    msg('복사 준비 중…');
+    let res; try { res = await api().xlsx_rows_html(x.file, $('#cSheet').value, parseInt($('#cRows').value, 10) || 1); } catch (e) { res = { ok: false, message: '복사 중 문제가 생겼어요.' }; }
+    if (!res.ok) return msg(res.message, true);
+    if (!copyRich(res.html)) return msg('클립보드에 복사하지 못했어요. 한 번 더 눌러 주세요.', true);
+    msg('✓ ' + res.rows + '행 × ' + res.cols + '열을 복사했어요. 열려 있는 엑셀에서 붙여넣을 첫 칸을 누르고 Ctrl+V 를 눌러 주세요.');
   }
   async function xlsxUse(id) {
     const x = (S.xlsx || []).find(q => String(q.id) === String(id)); if (!x) return;
@@ -2786,6 +2977,9 @@ class Api:
 
     def xlsx_copy(self, file, sheets, target):
         return xlsx_copy(file, sheets, target)
+
+    def xlsx_rows_html(self, file, sheet, rows):
+        return xlsx_rows_html(file, sheet, rows)
 
     def open_folder(self, path):
         try:
