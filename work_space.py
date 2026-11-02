@@ -1081,6 +1081,12 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 .fm-dlh{display:flex;align-items:center;gap:8px}
 .fm-dlh b{font-size:14px}
 .fm-items{font-size:11px;color:#a08a55;margin-top:4px;line-height:1.6;word-break:break-all}
+
+/* 회사명 */
+.fm-co{min-width:260px;flex:1;max-width:380px;padding:8px 11px;font-size:14px;font-weight:600}
+mark.tk-c{background:#d9f2e6;color:#1d6a49}
+.chip.tkb-c{border-color:#c5e3d3;background:#eefaf3;color:var(--mint-ink)}
+.tkl.c{background:#2a8a63}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -1406,6 +1412,7 @@ const WSLogic = (function () {
     s.rtodos = s.rtodos || [];
     s.events = s.events || [];
     s.notices = s.notices || [];
+    s.companies = Array.isArray(s.companies) ? s.companies : [];
     s.xlsx = s.xlsx || [];
     s.settle = s.settle || {};
     if (!Array.isArray(s.settle.deadlines)) s.settle.deadlines = [];
@@ -1415,6 +1422,7 @@ const WSLogic = (function () {
     if (legacyMan && legacyMan.date && s.settle.deadlines.length) s.settle.manual.push({ did: s.settle.deadlines[0].id, y: legacyMan.y, m: legacyMan.m, date: legacyMan.date });
     delete s.settle.rule;
     s.settle.y = s.settle.y || 0; s.settle.m = s.settle.m || 0;
+    s.settle.company = typeof s.settle.company === 'string' ? s.settle.company : '';
     s.rdone = s.rdone || {};
     s.skip = s.skip || {};
     s.extra_off = s.extra_off || [];
@@ -1526,6 +1534,7 @@ const WSLogic = (function () {
     ['정산말일', 's', v => String(v.end.getDate())],
     ['정산시작요일', 's', v => WD[v.start.getDay()]], ['정산종료요일', 's', v => WD[v.end.getDay()]],
   ];
+  const COMPANY_TOKEN = '회사명';   // {회사명} → 안내문 화면에서 입력한 회사 이름
   /* 마감 기한 항목: 마감 기한의 '이름' 뒤에 붙여 만들어져요. 예) 이름이 '제출' → {제출기한} {제출월일} {제출연도} {제출월} {제출일} {제출요일} */
   const DEFAULT_DL = '마감';
   const DL_SUFFIX = [['기한', d => fmtFull(d)], ['월일', d => fmtMDW(d)], ['연도', d => String(d.getFullYear())],
@@ -1536,7 +1545,7 @@ const WSLogic = (function () {
     if (!name) return '마감 기한 이름을 입력해 주세요. (예: 마감, 제출, 확인)';
     if (name.length > 12) return '이름은 12글자 이내로 써 주세요.';
     if (/[\s{}]/.test(name)) return '이름에는 공백이나 { } 를 쓸 수 없어요.';
-    const mine = deadlineTokenNames(name), reserved = new Set(TOKEN_DEFS.map(d => d[0]));
+    const mine = deadlineTokenNames(name), reserved = new Set(TOKEN_DEFS.map(d => d[0]).concat([COMPANY_TOKEN]));
     for (const t of mine) if (reserved.has(t)) return '"{' + t + '}" 항목이 정산 대상 항목과 겹쳐요. 다른 이름을 써 주세요.';
     for (const o of list || []) {
       if (o.id === selfId) continue;
@@ -1560,10 +1569,13 @@ const WSLogic = (function () {
     const dl = v.deadlines || (v.deadline !== undefined ? { [DEFAULT_DL]: v.deadline } : {});
     const known = new Set(Object.keys(dl)); known.add(DEFAULT_DL);
     const segs = [], unknown = [], missing = [], undefinedDeadlines = [];
+    let missingCompany = false;
+    const company = String(v.company == null ? '' : v.company).trim();
     const re = /\{([^{}\r\n]*)\}/g;
     let last = 0, m;
     body = String(body == null ? '' : body);
     const resolve = name => {
+      if (name === COMPANY_TOKEN) return { g: 'c' };
       if (smap[name]) return { g: 's', fn: smap[name] };
       for (const [sfx, fn] of DL_SUFFIX) {
         if (name.length > sfx.length && name.endsWith(sfx)) {
@@ -1580,20 +1592,23 @@ const WSLogic = (function () {
         const sf = DL_SUFFIX.find(([sfx]) => name.length > sfx.length && name.endsWith(sfx));
         if (sf) { const pre = name.slice(0, -sf[0].length); segs.push({ t: 'tok', v: m[0], k: 'u', name }); if (!undefinedDeadlines.includes(pre)) undefinedDeadlines.push(pre); }
         else { segs.push({ t: 'tok', v: m[0], k: 'u', name }); unknown.push(m[0]); }
+      } else if (def.g === 'c') {
+        if (company) segs.push({ t: 'tok', v: company, k: 'c', name });
+        else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); missingCompany = true; }
       } else if (def.g === 'd' && !dl[def.pre]) {
         segs.push({ t: 'tok', v: m[0], k: 'x', name, dl: def.pre }); if (!missing.includes(m[0])) missing.push(m[0]);
       } else segs.push({ t: 'tok', v: def.g === 'd' ? def.fn(dl[def.pre]) : def.fn(v), k: def.g, name, dl: def.pre });
       last = m.index + m[0].length;
     }
     if (last < body.length) segs.push({ t: 'text', v: body.slice(last) });
-    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines };
+    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines, missingCompany };
   }
 
   function setState(s) { ctx.S = s; }
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
-    removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, DEFAULT_DL, DL_SUFFIX, deadlineTokenNames, validateDeadlineName, renameDeadlineTokens, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, COMPANY_TOKEN, DEFAULT_DL, DL_SUFFIX, deadlineTokenNames, validateDeadlineName, renameDeadlineTokens, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -1995,7 +2010,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const c = calcSettle(), { f, blockers } = noticeBlockers(n.body, c);
       if (blockers.length) return;
       copyText(f.text, el, '안내문 복사');
+      if (c.company) { rememberCompany(c.company); persist(); }
     },
+    coChange(el) { S.settle.company = el.value.trim(); rememberCompany(el.value); commit(); },
+    coInput(el) { S.settle.company = el.value; persist(); refreshNoticePreview(); },
+    coManage() { openCompanies(); },
+    coUse(el) { const n = S.companies[Number(el.dataset.i)]; if (n == null) return; S.settle.company = n; rememberCompany(n); closeModal(); commit(); },
+    coDel(el) { S.companies.splice(Number(el.dataset.i), 1); commit(); },
     dlAdd() { openDeadline(0); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
     dlSave(el) {
@@ -2250,6 +2271,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }, true);
   document.addEventListener('focusout', e => {
     if (e.target.classList && e.target.classList.contains('tedit') && ui.editTodo != null) saveTodoEdit(e.target);
+  });
+  document.addEventListener('input', e => {
+    const el = e.target.closest && e.target.closest('[data-inp]');
+    if (el && acts[el.dataset.inp]) acts[el.dataset.inp](el);
   });
   document.addEventListener('change', e => {
     const el = e.target.closest && e.target.closest('[data-chg]');
@@ -2568,7 +2593,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return { id: dl.id, name: dl.name, rule: dl.rule, date, source, ok: date ? L.checkDate(date) : null };
     });
     const map = {}; deadlines.forEach(d => { map[d.name] = d.date; });
-    return { y, m, period, deadlines, vars: { y, m, start: period.start, end: period.end, deadlines: map } };
+    return { y, m, period, deadlines, company: (st.company || '').trim(), vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim() } };
   }
   function noticeBlockers(body, c) {
     const f = L.fillNotice(body, c.vars), b = [];
@@ -2576,6 +2601,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (c.deadlines.some(d => d.date && !d.ok)) b.push('마감 기한의 날짜·요일 검증에 실패했어요.');
     if (f.missing.length) b.push('마감 기한 항목(' + f.missing.join(', ') + ')의 날짜가 아직 없어요. 마감 기한을 추가하고 규칙을 설정해 주세요.');
     if (f.undefinedDeadlines.length) b.push('아직 만들지 않은 마감 기한이에요: ' + f.undefinedDeadlines.map(n => '"' + n + '"').join(', ') + ' · 마감 기한을 추가해 주세요.');
+    if (f.missingCompany) b.push('이 안내문에는 {회사명} 항목이 있어요. 위의 회사명 칸에 회사 이름을 입력해 주세요.');
     if (f.unknown.length) b.push('알 수 없는 항목이 있어요: ' + f.unknown.join(', ') + ' · 양식을 수정해 주세요.');
     return { f, blockers: b };
   }
@@ -2610,7 +2636,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (let y = y0; y <= y1; y++) yo += '<option value="' + y + '"' + (y === c.y ? ' selected' : '') + '>' + y + '년</option>';
     for (let m = 1; m <= 12; m++) mo += '<option value="' + m + '"' + (m === c.m ? ' selected' : '') + '>' + m + '월</option>';
     let h = '<div class="fm-sel"><span class="fm-lab">정산 대상</span><button class="btn" data-act="stPrev">‹</button><select data-chg="stY">' + yo + '</select><select data-chg="stM">' + mo + '</select>' +
-      '<button class="btn" data-act="stNext">›</button><span class="fm-hint">정산 대상 연도·월을 고르면 기간이 자동으로 계산돼요</span></div>';
+      '<button class="btn" data-act="stNext">›</button><span class="fm-hint">정산 대상 연도·월을 고르면 기간이 자동으로 계산돼요</span></div>' +
+      '<div class="fm-sel"><span class="fm-lab">회사명</span><input id="stCompany" class="fm-co" list="companyList" value="' + esc(c.company) + '" placeholder="안내문의 {회사명} 자리에 들어가요" data-chg="coChange" data-inp="coInput" autocomplete="off">' +
+      '<datalist id="companyList">' + (S.companies || []).map(n => '<option value="' + esc(n) + '"></option>').join('') + '</datalist>' +
+      ((S.companies || []).length ? '<button class="btn" data-act="coManage">저장된 회사 목록</button>' : '') + '<span class="fm-hint">한 번 입력하면 기억해요 · 다른 회사는 새로 입력하거나 목록에서 골라요</span></div>';
     /* 정산 대상 기간 */
     h += '<div class="fm-calc"><div class="fm-box s"><div class="fm-bt"><span class="fm-badge s">정산 대상</span><span class="fm-bm">' + c.y + '년 ' + c.m + '월분</span></div>' +
       '<div class="fm-k">정산 대상 기간</div><div class="fm-big">' + L.fmtFull(p.start) + ' ~ ' + L.fmtFull(p.end) + '</div>' +
@@ -2641,12 +2670,30 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!cur) return h + '<div class="empty" style="min-height:170px"><div><b>등록된 안내문 양식이 없어요</b>자주 쓰는 안내문을 등록해 두면 날짜만 자동으로 채워서 바로 복사할 수 있어요</div></div>';
     const { f, blockers } = noticeBlockers(cur.body, c);
     const prev = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
-    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark></span><span class="sp"></span>' +
+    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark></span><span class="sp"></span>' +
       '<button class="btn primary" data-act="noticeCopy" data-id="' + cur.id + '"' + (blockers.length ? ' disabled' : '') + '>안내문 복사</button>' +
       '<button class="btn" data-act="noticeEdit" data-id="' + cur.id + '">수정</button><button class="btn danger" data-act="noticeDel" data-id="' + cur.id + '">삭제</button></div>' +
-      (blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '') +
+      '<div id="noticeBlk">' + (blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '') + '</div>' +
       '<div class="fm-preview" id="noticePrev">' + prev + '</div>';
     return h;
+  }
+
+  /* 회사명: 입력한 이름을 기억하고(목록), 입력하는 동안 미리보기를 바로 갱신 */
+  function rememberCompany(name) {
+    name = (name || '').trim(); if (!name) return;
+    S.companies = [name].concat((S.companies || []).filter(x => x !== name)).slice(0, 20);
+  }
+  function refreshNoticePreview() {
+    const n = (S.notices || []).find(x => x.id === ui.noticeId), prev = $('#noticePrev'); if (!n || !prev) return;
+    const c = calcSettle(), { f, blockers } = noticeBlockers(n.body, c);
+    prev.innerHTML = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
+    const blk = $('#noticeBlk'); if (blk) blk.innerHTML = blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '';
+    const btn = document.querySelector('[data-act="noticeCopy"]'); if (btn) btn.disabled = blockers.length > 0;
+  }
+  function openCompanies() {
+    openModal(() => '<h3>저장된 회사 목록</h3><p class="hint2">회사명 칸에 입력했던 이름이에요. 필요 없는 건 지울 수 있어요.</p><div class="mlist">' +
+      ((S.companies || []).length ? S.companies.map((n, i) => '<div class="mitem"><div class="mt"><b>' + esc(n) + '</b></div><button class="btn" data-act="coUse" data-i="' + i + '">사용</button><button class="xb" data-act="coDel" data-i="' + i + '" title="삭제">✕</button></div>').join('') : '<div class="tempty">저장된 회사가 없어요</div>') +
+      '</div><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>', true);
   }
 
   /* 안내문 양식 등록/수정 */
@@ -2658,6 +2705,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<label>양식 이름</label><input id="nName" value="' + esc(n ? n.name : '') + '" placeholder="예: 월 정산 자료 제출 안내">' +
       '<label>안내문 내용 (줄바꿈·띄어쓰기가 그대로 저장돼요)</label><textarea id="nBody" class="fm-body" spellcheck="false" placeholder="예)&#10;안녕하세요.&#10;&#10;정산 대상 기간: {정산대상기간}&#10;제출 기한: {마감기한}&#10;&#10;감사합니다.">' + esc(n ? n.body : '') + '</textarea>' +
       '<label>날짜 항목 넣기 (누르면 커서 위치에 들어가요)</label><div class="tkbar"><div class="tkrow"><span class="tkl s">정산 대상</span>' + chips(L.TOKEN_DEFS.map(d => d[0]), 's') + '</div>' +
+      '<div class="tkrow"><span class="tkl c">회사</span>' + chips([L.COMPANY_TOKEN], 'c') + '</div>' +
       dlNames.map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
       '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
