@@ -752,8 +752,8 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .table{border:1px solid var(--line);border-radius:14px;overflow:hidden;flex:none}
 .rw{display:grid;align-items:center;gap:12px;padding:0 16px;min-height:52px;border-bottom:1px solid var(--line2)}
 .rw:last-child{border-bottom:0}
-.rw.prog{grid-template-columns:minmax(0,1fr) 150px 200px 250px}
-.rw.all{grid-template-columns:minmax(0,1fr) 150px 200px 230px}
+.rw.prog{grid-template-columns:minmax(0,1fr) 150px 200px 310px}
+.rw.all{grid-template-columns:minmax(0,1fr) 150px 200px 290px}
 .rw.head{min-height:40px;background:#f6f5fa;color:#7d7b95;font-weight:600;font-size:12px}
 .rw .c-t{font-weight:600;word-break:break-all}
 .rw .c-p,.rw .c-m{color:#6f6d86;font-size:13px}
@@ -776,6 +776,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .action.start:hover{background:#7e93d6}
 .action.finish{background:var(--mint);border-color:#c5e3d3;color:var(--mint-ink)}
 .action.finish:hover{background:#d3ecde}
+.action.sub{background:#fff;border-color:var(--line2);color:var(--muted)}
+.action.sub:hover{background:#f1f0f8;color:var(--text)}
+.badge.subd{background:#efedf6;color:#7b7896}
 .undo{border:0;background:transparent;color:#a3a1b9;font-size:12px;font-weight:600;padding:5px 7px;border-radius:8px;text-decoration:underline;text-underline-offset:2px}
 .undo:hover{background:#f1f0f8;color:var(--text)}
 .empty{flex:1;display:grid;place-items:center;color:#b9b7c9;text-align:center;padding:50px 10px;line-height:1.8}
@@ -1315,6 +1318,9 @@ const WSLogic = (function () {
 
   function startTask(key) { ctx.S.prog[key] = { s: 'doing', at: iso(today()) }; }
   function finishTask(key) { const p = ctx.S.prog[key] || {}; ctx.S.prog[key] = { s: 'done', at: p.at || iso(today()), done_at: iso(today()) }; }
+  /* 대직: 다른 사람이 대신 처리한 업무. 완료로 보지만 근무일지에는 담지 않아요 */
+  function subTask(key) { finishTask(key); ctx.S.prog[key].sub = 1; }
+  const isSub = key => !!(ctx.S.prog[key] || {}).sub;
   function resetTask(key) { delete ctx.S.prog[key]; }
   function removeTask(id) {
     ctx.S.tasks = ctx.S.tasks.filter(t => t.id !== id);
@@ -1607,7 +1613,7 @@ const WSLogic = (function () {
   function setState(s) { ctx.S = s; }
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
-    ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, resetTask,
+    ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, subTask, isSub, resetTask,
     removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, COMPANY_TOKEN, DEFAULT_DL, DL_SUFFIX, deadlineTokenNames, validateDeadlineName, renameDeadlineTokens, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
@@ -1930,8 +1936,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* ── 상태 버튼 / 칩 ── */
   function stateCell(o, small) {
     const st = stOf(o.key), k = ' data-key="' + o.key + '"';
-    if (st === 'todo') return '<button class="action start" data-act="start"' + k + '>진행</button>';
-    if (st === 'doing') return '<span class="badge run">진행</span><button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>';
+    const sb = '<button class="action sub" data-act="substitute"' + k + ' title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button>';
+    if (st === 'todo') return sb + '<button class="action start" data-act="start"' + k + '>진행</button>';
+    if (st === 'doing') return sb + '<span class="badge run">진행</span><button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>';
+    if (L.isSub(o.key)) return '<span class="badge subd" title="대직으로 완료 · 근무일지에 담기지 않아요">대직 완료</span><button class="undo" data-act="reopen"' + k + ' title="대직 완료를 취소하고 진행으로 되돌려요">취소</button>';
     return '<span class="badge done">완료</span><button class="undo" data-act="reopen"' + k + ' title="완료를 취소하고 진행으로 되돌려요">취소</button>';
   }
 
@@ -2088,6 +2096,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     start(el) { L.startTask(el.dataset.key); commit(); },
     finish(el) { L.finishTask(el.dataset.key); commit(); },
+    substitute(el) { L.subTask(el.dataset.key); commit(); },
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
@@ -2391,7 +2400,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     h += '<div class="table"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>';
     for (const o of list) {
       h += '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + '<button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
+        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + '<button class="action sub" data-act="substitute" data-key="' + o.key + '" title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button><button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
         '<button class="undo" data-act="reset" data-key="' + o.key + '" title="시작을 취소하고 시작 전으로 되돌려요">취소</button></div></div>';
     }
     return h + '</div>';
@@ -2521,6 +2530,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const k of keys) {
       const o = L.occByKey(k); if (!o) continue;
       const p = S.prog[k] || {};
+      if (p.sub) continue;   // 대직으로 완료한 업무는 근무일지에 넣지 않아요
       const subs = L.subsOf(o);
       if (withSubs && o.task.logSubs !== false && subs.length) {
         // 세부 업무를 담는 업무: 체크한 날 바로, 업무명 없이 그날 체크한 세부 업무를 쉼표로
