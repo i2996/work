@@ -2097,6 +2097,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     start(el) { L.startTask(el.dataset.key); commit(); },
     finish(el) { L.finishTask(el.dataset.key); commit(); },
     substitute(el) { L.subTask(el.dataset.key); commit(); },
+    startPopHide() { S.startPopSeen = iso(today()); persist(); closeModal(); },
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
@@ -2957,6 +2958,25 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     render();
   };
 
+  /* 시작 알림: 프로그램을 켤 때 오늘이 업무 기간 시작일인 업무를 팝업으로 보여줘요 */
+  function startsToday() {
+    const t = today(), ts = iso(t);
+    return L.occRange(t, t, { noTodos: true }).filter(o => iso(o.start) === ts).sort(L.byEnd);
+  }
+  function showStartPopup() {
+    const ts = iso(today());
+    if (S.startPopSeen === ts) return;
+    if (!startsToday().some(o => stOf(o.key) !== 'done')) return;
+    openModal(() => {
+      const list = startsToday();
+      let h = '<h3>오늘부터 시작하는 업무 ' + list.length + '건</h3><p class="hint2">업무 기간이 오늘 시작해요. 바로 \'진행\'을 누르면 근무일지에도 오늘부터 담겨요.</p><div class="mlist">';
+      for (const o of list) {
+        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + subTag(o) + '</b><span>' + periodText(o) + (iso(o.start) === iso(o.end) ? ' · 오늘 마감' : ' 마감') + '</span></div>' + stateCell(o) + '</div>';
+      }
+      return h + '</div><div class="modal-actions"><button class="btn" data-act="startPopHide" title="오늘은 프로그램을 다시 켜도 이 창이 뜨지 않아요">오늘 다시 보지 않기</button><button class="btn primary" data-act="mClose">확인</button></div>';
+    }, true);
+  }
+
   async function boot() {
     const r = await loadAll();
     L.setHol(r.holidays || {});
@@ -2967,6 +2987,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     lastDay = iso(today());
     setInterval(() => { if (iso(today()) !== lastDay) { lastDay = iso(today()); render(); } }, 60000);
     window.__WS_READY = true;
+    if (MODE === 'main') showStartPopup();
     if (MODE === 'main' && hasPy() && api().check_update) {
       setTimeout(async () => { try { const r = await api().check_update(false); if (r && r.status === 'available') showUpdate(r); } catch (e) { /* ignore */ } }, 2500);
     }
