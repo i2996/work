@@ -2957,22 +2957,32 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     render();
   };
 
-  /* 시작 알림: 프로그램을 켤 때 업무 기간 안인데 아직 진행하지 않은 업무를 팝업으로 보여줘요 (진행할 때까지 매번) */
+  /* 시작 알림: 프로그램을 켤 때 보여줘요 (처리할 때까지 매번)
+     - 지연: 마감이 지났는데 아직 완료하지 않은 업무 (지연 기준은 다른 화면과 같이 최근 7일)
+     - 진행 가능: 업무 기간 안인데 아직 진행하지 않은 업무 */
   function readyToStart() {
     const t = today();
     return L.occRange(t, t, { noTodos: true }).filter(o => stOf(o.key) === 'todo').sort(L.byEnd);
   }
   function showStartPopup() {
-    const keys = readyToStart().map(o => o.key);
-    if (!keys.length) return;
+    const lateKeys = L.lateList().map(o => o.key), readyKeys = readyToStart().map(o => o.key);
+    if (!lateKeys.length && !readyKeys.length) return;
+    const row = (o, late) => {
+      const n = diffDays(o.end, today()), st = stOf(o.key);
+      const info = late ? '지연 D+' + (-n) : n === 0 ? '오늘 마감' : '마감까지 ' + n + '일';
+      // 지연인데 진행 중이면 바로 완료할 수 있게 대직 + 완료 버튼만
+      const btns = late && st === 'doing'
+        ? '<span class="badge run">진행</span><button class="action sub" data-act="substitute" data-key="' + o.key + '" title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button><button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>'
+        : stateCell(o);
+      return '<div class="mitem' + (late && st !== 'done' ? ' pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + subTag(o) + '</b><span>' + periodText(o) + ' · ' + info + '</span></div>' + btns + '</div>';
+    };
     openModal(() => {
-      const list = keys.map(k => L.occByKey(k)).filter(Boolean);
-      let h = '<h3>진행 가능 업무 ' + list.length + '건</h3><p class="hint2">업무 기간이 시작됐는데 아직 진행하지 않은 업무예요. \'진행\'을 누를 때까지 프로그램을 켤 때마다 알려드려요.</p><div class="mlist">';
-      for (const o of list) {
-        const n = diffDays(o.end, today());
-        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + subTag(o) + '</b><span>' + periodText(o) + (n === 0 ? ' · 오늘 마감' : ' · 마감까지 ' + n + '일') + '</span></div>' + stateCell(o) + '</div>';
-      }
-      return h + '</div><div class="modal-actions"><button class="btn primary" data-act="mClose">확인</button></div>';
+      const late = lateKeys.map(k => L.occByKey(k)).filter(Boolean), ready = readyKeys.map(k => L.occByKey(k)).filter(Boolean);
+      let h = '<h3>' + [late.length ? '지연 업무 ' + late.length + '건' : '', ready.length ? '진행 가능 업무 ' + ready.length + '건' : ''].filter(Boolean).join(' · ') + '</h3>' +
+        '<p class="hint2">지연 업무는 완료할 때까지, 진행 가능 업무는 \'진행\'을 누를 때까지 프로그램을 켤 때마다 알려드려요.</p>';
+      if (late.length) h += '<div class="grp-t late">지연</div><div class="mlist">' + late.map(o => row(o, true)).join('') + '</div>';
+      if (ready.length) h += '<div class="grp-t">진행 가능</div><div class="mlist">' + ready.map(o => row(o, false)).join('') + '</div>';
+      return h + '<div class="modal-actions"><button class="btn primary" data-act="mClose">확인</button></div>';
     }, true);
   }
 
