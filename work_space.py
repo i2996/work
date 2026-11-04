@@ -2097,7 +2097,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     start(el) { L.startTask(el.dataset.key); commit(); },
     finish(el) { L.finishTask(el.dataset.key); commit(); },
     substitute(el) { L.subTask(el.dataset.key); commit(); },
-    startPopHide() { S.startPopSeen = iso(today()); persist(); closeModal(); },
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
@@ -2958,22 +2957,22 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     render();
   };
 
-  /* 시작 알림: 프로그램을 켤 때 오늘이 업무 기간 시작일인 업무를 팝업으로 보여줘요 */
-  function startsToday() {
-    const t = today(), ts = iso(t);
-    return L.occRange(t, t, { noTodos: true }).filter(o => iso(o.start) === ts).sort(L.byEnd);
+  /* 시작 알림: 프로그램을 켤 때 업무 기간 안인데 아직 진행하지 않은 업무를 팝업으로 보여줘요 (진행할 때까지 매번) */
+  function readyToStart() {
+    const t = today();
+    return L.occRange(t, t, { noTodos: true }).filter(o => stOf(o.key) === 'todo').sort(L.byEnd);
   }
   function showStartPopup() {
-    const ts = iso(today());
-    if (S.startPopSeen === ts) return;
-    if (!startsToday().some(o => stOf(o.key) !== 'done')) return;
+    const keys = readyToStart().map(o => o.key);
+    if (!keys.length) return;
     openModal(() => {
-      const list = startsToday();
-      let h = '<h3>오늘부터 시작하는 업무 ' + list.length + '건</h3><p class="hint2">업무 기간이 오늘 시작해요. 바로 \'진행\'을 누르면 근무일지에도 오늘부터 담겨요.</p><div class="mlist">';
+      const list = keys.map(k => L.occByKey(k)).filter(Boolean);
+      let h = '<h3>진행 가능 업무 ' + list.length + '건</h3><p class="hint2">업무 기간이 시작됐는데 아직 진행하지 않은 업무예요. \'진행\'을 누를 때까지 프로그램을 켤 때마다 알려드려요.</p><div class="mlist">';
       for (const o of list) {
-        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + subTag(o) + '</b><span>' + periodText(o) + (iso(o.start) === iso(o.end) ? ' · 오늘 마감' : ' 마감') + '</span></div>' + stateCell(o) + '</div>';
+        const n = diffDays(o.end, today());
+        h += '<div class="mitem"><div class="mt"><b>' + esc(o.title) + subTag(o) + '</b><span>' + periodText(o) + (n === 0 ? ' · 오늘 마감' : ' · 마감까지 ' + n + '일') + '</span></div>' + stateCell(o) + '</div>';
       }
-      return h + '</div><div class="modal-actions"><button class="btn" data-act="startPopHide" title="오늘은 프로그램을 다시 켜도 이 창이 뜨지 않아요">오늘 다시 보지 않기</button><button class="btn primary" data-act="mClose">확인</button></div>';
+      return h + '</div><div class="modal-actions"><button class="btn primary" data-act="mClose">확인</button></div>';
     }, true);
   }
 
