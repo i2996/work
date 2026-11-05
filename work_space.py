@@ -295,8 +295,11 @@ def xlsx_inspect(path, kind):
 
 
 def xlsx_read_cells(path, items):
-    """매달 새 엑셀 파일에서 정해 둔 시트·칸의 값만 읽어 옴 (이 PC 안에서만, 파일은 고치지 않음).
-    items: [{"sheet": 시트명, "cell": "D5"}] → values: [{"v": 값} 또는 {"err": 안내}]"""
+    """매달 새 엑셀 파일에서 정해 둔 시트의 칸·열 값만 읽어 옴 (이 PC 안에서만, 파일은 고치지 않음).
+    items: [{"kind": "cell", "sheet": 시트명, "cell": "D5"}
+            {"kind": "sum"|"small"|"big", "sheet": 시트명, "col": "F", "start": 2}]
+      sum: 열 합계 / small: 금액 자체가 100원 미만인 줄의 합 / big: 100원 미만인 줄을 뺀 합 (음수는 크기로 판단)
+    → values: [{"v": 값, "n": 더한 줄 수} 또는 {"err": 안내}]"""
     if openpyxl is None:
         return {"ok": False, "message": "엑셀 처리 라이브러리(openpyxl)를 찾지 못했어요. 프로그램을 최신 버전으로 업데이트해 주세요."}
     path = os.path.abspath(path or "")
@@ -314,12 +317,55 @@ def xlsx_read_cells(path, items):
         return {"ok": False, "message": "엑셀 파일을 읽을 수 없어요. 암호가 걸려 있거나 손상된 파일일 수 있어요. 암호가 걸린 파일은 읽을 수 없어요."}
     except Exception as e:
         return {"ok": False, "message": "엑셀 파일을 읽지 못했어요: %s" % e}
-    out = []
+    out, cols = [], {}
+
+    def to_num(v):
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return v
+        if isinstance(v, str):   # 글자로 저장된 숫자 (예: '1,234')
+            t = v.strip().replace(",", "")
+            if re.fullmatch(r"-?\d+(\.\d+)?", t):
+                return float(t) if "." in t else int(t)
+        return None
+
+    def column(sheet, col, start):
+        key = (sheet, col, start)
+        if key not in cols:
+            ci = column_index_from_string(col)
+            nums = []
+            for (v,) in wb[sheet].iter_rows(min_row=start, min_col=ci, max_col=ci, values_only=True):
+                n = to_num(v)
+                if n is not None:
+                    nums.append(n)
+            cols[key] = nums
+        return cols[key]
+
+    def tidy(x):
+        x = round(x, 2)
+        return int(x) if float(x).is_integer() else x
+
     try:
         for it in items or []:
+            kind = it.get("kind") or "cell"
             sheet, cell = str(it.get("sheet") or "").strip(), str(it.get("cell") or "").strip().upper()
             if sheet not in wb.sheetnames:
                 out.append({"err": "'%s' 시트가 없어요" % sheet})
+                continue
+            if kind in ("sum", "small", "big"):
+                col = str(it.get("col") or "").strip().upper()
+                try:
+                    start = max(1, int(it.get("start") or 1))
+                    nums = column(sheet, col, start)
+                except Exception:
+                    out.append({"err": "'%s' 열 이름이 올바르지 않아요" % col})
+                    continue
+                if not nums:
+                    out.append({"err": "%s 시트 %s열 %d행부터 숫자가 없어요" % (sheet, col, start)})
+                    continue
+                pick = nums if kind == "sum" else [n for n in nums if (abs(n) < 100) == (kind == "small")]
+                out.append({"v": tidy(sum(pick)), "n": len(pick)})
                 continue
             try:
                 col, row = coordinate_from_string(cell)
@@ -1205,9 +1251,13 @@ mark.tk-a{background:#fbe3d6;color:#9a4a1f}
 mark.tk-e{background:#e1f1d8;color:#3d6b2a}
 .chip.tkb-e{border-color:#cde5c0;background:#f1f9ec;color:#3d6b2a}
 .tkl.e{background:#5f9a45}
-.xi-row{display:grid;grid-template-columns:1.4fr 1fr 80px 30px;gap:6px;align-items:center;margin-bottom:6px}
-.xi-row input{padding:7px 9px;font-size:13px}
-.xi-head{display:grid;grid-template-columns:1.4fr 1fr 80px 30px;gap:6px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}
+.xi-row{display:grid;grid-template-columns:1.5fr 1.25fr 0.9fr 64px 60px 30px;gap:6px;align-items:center;margin-bottom:6px}
+.xi-row input,.xi-row select{padding:7px 8px;font-size:13px;min-width:0}
+.xi-row input:disabled{background:#f4f3f8;color:var(--faint)}
+.xi-head{display:grid;grid-template-columns:1.5fr 1.25fr 0.9fr 64px 60px 30px;gap:6px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}
+.xi-bulk{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:10px;border-radius:12px;background:#f6f5fa;margin:10px 0 4px;font-size:12px;color:var(--muted)}
+.xi-bulk input{padding:6px 8px;font-size:13px;width:110px}
+.xi-bulk input.sm{width:60px}
 .fm-amt .tot{min-width:150px;padding:8px 10px;font-size:14px;font-weight:700;text-align:right;background:#f6f5fa;border-radius:10px;color:var(--text)}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
@@ -2191,9 +2241,20 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     xvPick() { xvRead(''); },
     xvReload() { const c = calcSettle(), xv = S.settle.xVals[amtKey(c.y, c.m)]; xvRead(xv && xv.path || ''); },
     xvClear() { const c = calcSettle(); delete S.settle.xVals[amtKey(c.y, c.m)]; commit(); },
-    xiAdd() { xiForm.read(); xiForm.items.push({ id: S.next_id++, name: '', sheet: xiForm.items.length ? xiForm.items[xiForm.items.length - 1].sheet : '', cell: '' }); curModal.refresh(); const ins = curModal.el.querySelectorAll('.xi-name'); if (ins.length) ins[ins.length - 1].focus(); },
+    xiAdd() { xiForm.read(); const last = xiForm.items[xiForm.items.length - 1] || {}; xiForm.items.push({ id: S.next_id++, name: '', kind: last.kind || 'sum', sheet: last.sheet || '', cell: '', col: '', start: last.start || '2' }); curModal.refresh(); const ins = curModal.el.querySelectorAll('.xi-name'); if (ins.length) ins[ins.length - 1].focus(); },
     xiDel(el) { xiForm.read(); xiForm.items.splice(Number(el.dataset.i), 1); curModal.refresh(); },
     xiSave() { xiSave(); },
+    xiKind() { xiForm.read(); xiForm.items.forEach(x => { if (x.kind !== 'cell' && !x.start) x.start = '2'; }); curModal.refresh(); },
+    xiBulk() {
+      xiForm.read();
+      const b = xiForm.bulk, base = (b.base || '').trim(), col = (b.col || '').trim().toUpperCase();
+      if (!base || !(b.sheet || '').trim() || !/^[A-Z]{1,3}$/.test(col)) { $('#xiErr').textContent = '열 하나로 만들기: 이름, 시트, 열(예: F)을 입력해 주세요.'; return; }
+      xiForm.items = xiForm.items.filter(x => x.name || x.sheet || x.cell || x.col);   // 빈 줄 정리
+      [['sum', '합계'], ['small', '100원미만'], ['big', '100원미만제외']].forEach(([k, sfx]) =>
+        xiForm.items.push({ id: S.next_id++, name: base + sfx, kind: k, sheet: b.sheet.trim(), cell: '', col, start: String(parseInt(b.start, 10) || 1) }));
+      xiForm.bulk = { base: '', sheet: b.sheet, col: '', start: b.start };
+      curModal.refresh();
+    },
     amClear() { const c = calcSettle(); delete S.settle.amounts[amtKey(c.y, c.m)]; commit(); },
     tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
@@ -2980,7 +3041,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (xi.length && xv) {
       h += '<div class="fm-xv">' + xi.map(it => {
         const val = (xv.vals || {})[it.name], err = (xv.errs || {})[it.name];
-        return '<div class="' + (val ? '' : 'bad') + '" title="' + esc(it.sheet + '!' + it.cell) + '"><b>' + esc(it.name) + '</b><span>' + esc(val || err || '값 없음') + '</span></div>';
+        const n = (xv.cnt || {})[it.name];
+        return '<div class="' + (val ? '' : 'bad') + '" title="' + esc(xiSrc(it) + (n != null ? ' · ' + n + '줄 더함' : '')) + '"><b>' + esc(it.name) + '</b><span>' + esc(val || err || '값 없음') + '</span></div>';
       }).join('') + '</div>';
     }
     /* 정산 대상 기간 */
@@ -3097,38 +3159,58 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!items.length) return openXItems();
     if (!hasPy() || !api().xlsx_read_cells) return infoModal('사용할 수 없어요', '엑셀 파일 읽기는 WorkSpace.exe 로 실행할 때만 사용할 수 있어요.');
     let res;
-    try { res = await api().xlsx_read_cells(path, items.map(x => ({ sheet: x.sheet, cell: x.cell }))); } catch (e) { res = { ok: false, message: String(e) }; }
+    try { res = await api().xlsx_read_cells(path, items.map(x => ({ kind: x.kind || 'cell', sheet: x.sheet, cell: x.cell, col: x.col, start: x.start }))); } catch (e) { res = { ok: false, message: String(e) }; }
     if (!res || res.cancelled) return;
     if (!res.ok) return infoModal('엑셀 파일을 읽지 못했어요', res.message || '');
     const c = calcSettle(), vals = {}, errs = {};
-    items.forEach((x, i) => { const r = (res.values || [])[i] || {}; if (r.err) errs[x.name] = r.err; else vals[x.name] = xFmt(r.v); });
-    S.settle.xVals[amtKey(c.y, c.m)] = { vals, errs, file: res.file, path: res.path, at: iso(today()) };
+    const cnt = {};
+    items.forEach((x, i) => { const r = (res.values || [])[i] || {}; if (r.err) errs[x.name] = r.err; else { vals[x.name] = xFmt(r.v); if (r.n != null) cnt[x.name] = r.n; } });
+    S.settle.xVals[amtKey(c.y, c.m)] = { vals, errs, cnt, file: res.file, path: res.path, at: iso(today()) };
     commit();
     const bad = Object.entries(errs);
     if (bad.length) infoModal('읽지 못한 칸이 있어요', bad.map(([n, e]) => '· ' + n + ': ' + e).join('\n') + '\n\n시트 이름과 칸 주소를 \'항목 설정\'에서 확인해 주세요.');
   }
-  /* 항목 설정: 이름(안내문 항목) · 시트 · 칸 */
+  /* 항목 설정: 이름(안내문 항목) · 읽는 방식 · 시트 · 칸 또는 열 */
+  const XI_KINDS = [['cell', '칸 하나'], ['sum', '열 합계'], ['small', '열 100원 미만 합'], ['big', '열 100원 미만 제외 합']];
+  const xiSrc = x => (x.kind && x.kind !== 'cell' ? x.sheet + ' 시트 ' + x.col + '열 ' + (x.start || 1) + '행부터 · ' + (XI_KINDS.find(k => k[0] === x.kind) || [, ''])[1] : x.sheet + '!' + x.cell);
   let xiForm = null;
   function openXItems() {
-    xiForm = { items: JSON.parse(JSON.stringify(S.settle.xItems || [])) };
-    if (!xiForm.items.length) xiForm.items.push({ id: S.next_id++, name: '', sheet: '', cell: '' });
-    const M = openModal(() => '<h3>엑셀에서 읽을 항목</h3><p class="hint2">항목 이름은 안내문에 <b>{이름}</b>으로 넣어요. 매달 새 파일이어도 시트 이름과 칸 주소가 같으면 그대로 읽어요.<br>정한 칸의 값만 읽고, 다른 칸(주민번호 등)은 읽거나 저장하지 않아요. 암호가 걸린 파일은 읽을 수 없어요.</p>' +
-      '<div class="xi-head"><span>항목 이름 (예: 고용환급금액)</span><span>시트 이름</span><span>칸 (예: D5)</span><span></span></div>' +
-      xiForm.items.map((x, i) => '<div class="xi-row"><input class="xi-name" data-i="' + i + '" data-f="name" value="' + esc(x.name) + '" placeholder="고용환급금액">' +
-        '<input data-i="' + i + '" data-f="sheet" value="' + esc(x.sheet) + '" placeholder="정산">' +
-        '<input data-i="' + i + '" data-f="cell" value="' + esc(x.cell) + '" placeholder="D5">' +
-        '<button type="button" class="xb" data-act="xiDel" data-i="' + i + '" title="삭제">✕</button></div>').join('') +
+    xiForm = { items: JSON.parse(JSON.stringify(S.settle.xItems || [])).map(x => Object.assign({ kind: 'cell', col: '', start: '' }, x)), bulk: { base: '', sheet: '', col: '', start: '2' } };
+    if (!xiForm.items.length) xiForm.items.push({ id: S.next_id++, name: '', kind: 'sum', sheet: '', cell: '', col: '', start: '2' });
+    const M = openModal(() => '<h3>엑셀에서 읽을 항목</h3><p class="hint2">항목 이름은 안내문에 <b>{이름}</b>으로 넣어요. 매달 새 파일이어도 시트 이름과 칸·열이 같으면 그대로 읽어요.<br>' +
+      '열은 시작 행부터 끝까지 숫자를 더해요 (머리글 같은 글자 칸은 빼요). <b>100원 미만</b>은 금액 자체가 100원 미만인 줄이에요 (음수는 크기로 판단).<br>정한 칸·열의 값만 읽고, 다른 칸(주민번호 등)은 읽거나 저장하지 않아요. 암호가 걸린 파일은 읽을 수 없어요.</p>' +
+      '<div class="xi-head"><span>항목 이름</span><span>읽는 방식</span><span>시트 이름</span><span>칸 / 열</span><span>시작 행</span><span></span></div>' +
+      xiForm.items.map((x, i) => {
+        const col = x.kind !== 'cell';
+        return '<div class="xi-row"><input class="xi-name" data-i="' + i + '" data-f="name" value="' + esc(x.name) + '" placeholder="고용환급금액">' +
+          '<select data-i="' + i + '" data-f="kind" data-chg="xiKind">' + XI_KINDS.map(([k, n]) => '<option value="' + k + '"' + (x.kind === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' +
+          '<input data-i="' + i + '" data-f="sheet" value="' + esc(x.sheet) + '" placeholder="정산">' +
+          '<input data-i="' + i + '" data-f="' + (col ? 'col' : 'cell') + '" value="' + esc(col ? x.col : x.cell) + '" placeholder="' + (col ? 'F' : 'D5') + '">' +
+          '<input data-i="' + i + '" data-f="start" value="' + esc(col ? (x.start || '') : '') + '" placeholder="' + (col ? '2' : '-') + '"' + (col ? '' : ' disabled') + ' inputmode="numeric">' +
+          '<button type="button" class="xb" data-act="xiDel" data-i="' + i + '" title="삭제">✕</button></div>';
+      }).join('') +
       '<button type="button" class="btn addsub" data-act="xiAdd">＋ 항목 추가</button>' +
+      '<div class="xi-bulk"><b style="color:var(--text)">열 하나로 3개 한 번에</b><input id="xbBase" placeholder="이름 (예: 고용환급)" value="' + esc(xiForm.bulk.base) + '">' +
+      '<input id="xbSheet" placeholder="시트" value="' + esc(xiForm.bulk.sheet) + '"><input id="xbCol" class="sm" placeholder="열 (F)" value="' + esc(xiForm.bulk.col) + '">' +
+      '<input id="xbStart" class="sm" placeholder="시작 행" value="' + esc(xiForm.bulk.start) + '" inputmode="numeric"><button type="button" class="btn" data-act="xiBulk">＋ 3개 만들기</button>' +
+      '<span>→ {이름합계} {이름100원미만} {이름100원미만제외} (만든 뒤 이름은 바꿀 수 있어요)</span></div>' +
       '<div class="err" id="xiErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xiSave">저장</button></div>', true);
-    M.el.style.width = 'min(640px,100%)';
-    xiForm.read = () => M.el.querySelectorAll('.xi-row input').forEach(inp => { const x = xiForm.items[Number(inp.dataset.i)]; if (x) x[inp.dataset.f] = inp.value; });
+    M.el.style.width = 'min(860px,100%)';
+    xiForm.read = () => {
+      M.el.querySelectorAll('.xi-row input, .xi-row select').forEach(inp => { const x = xiForm.items[Number(inp.dataset.i)]; if (x && !inp.disabled) x[inp.dataset.f] = inp.value; });
+      ['base', 'sheet', 'col', 'start'].forEach(k => { const el = M.el.querySelector('#xb' + k[0].toUpperCase() + k.slice(1)); if (el) xiForm.bulk[k] = el.value; });
+    };
     setTimeout(() => { const i = M.el.querySelector('.xi-name'); if (i) i.focus(); }, 0);
   }
   function xiSave() {
     xiForm.read();
     const err = m => { const e = $('#xiErr'); if (e) e.textContent = m; };
-    const items = xiForm.items.map(x => ({ id: x.id, name: (x.name || '').trim(), sheet: (x.sheet || '').trim(), cell: (x.cell || '').trim().toUpperCase().replace(/\$/g, '') }))
-      .filter(x => x.name || x.sheet || x.cell);
+    const items = xiForm.items.map(x => {
+      const kind = x.kind || 'cell', o = { id: x.id, name: (x.name || '').trim(), kind, sheet: (x.sheet || '').trim() };
+      if (kind === 'cell') o.cell = (x.cell || '').trim().toUpperCase().replace(/\$/g, '');
+      else { o.col = (x.col || '').trim().toUpperCase().replace(/\$/g, ''); o.start = parseInt(x.start, 10) || 1; }
+      return o;
+    }).filter(x => x.name || x.sheet || x.cell || x.col);
     const reserved = new Set(L.TOKEN_DEFS.map(d => d[0]).concat([L.COMPANY_TOKEN, L.TASK_TOKEN, L.TIME_TOKEN], L.AMOUNT_TOKENS));
     (S.settle.deadlines || []).forEach(d => L.deadlineTokenNames(d.name).forEach(t => reserved.add(t)));
     const seen = new Set();
@@ -3139,7 +3221,11 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (seen.has(x.name)) return err('"' + x.name + '" 이름이 두 번 있어요.');
       seen.add(x.name);
       if (!x.sheet) return err('"' + x.name + '"의 시트 이름을 입력해 주세요.');
-      if (!/^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(x.cell)) return err('"' + x.name + '"의 칸 주소가 올바르지 않아요. (예: D5)');
+      if (x.kind === 'cell') { if (!/^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(x.cell)) return err('"' + x.name + '"의 칸 주소가 올바르지 않아요. (예: D5)'); }
+      else {
+        if (!/^[A-Z]{1,3}$/.test(x.col)) return err('"' + x.name + '"의 열 이름이 올바르지 않아요. (예: F)');
+        if (!(x.start >= 1 && x.start <= 1048576)) return err('"' + x.name + '"의 시작 행을 확인해 주세요.');
+      }
     }
     // 이름을 바꾸면 안내문 속 항목과 이미 읽은 값도 같이 바꿔 줌
     const old = new Map((S.settle.xItems || []).map(x => [x.id, x.name]));
@@ -3148,7 +3234,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (!o || o === x.name) continue;
       const re = new RegExp('\\{\\s*' + o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\}', 'g');
       (S.notices || []).forEach(n => { n.body = String(n.body || '').replace(re, '{' + x.name + '}'); if (n.html != null) n.html = n.html.replace(re, '{' + x.name + '}'); });
-      Object.values(S.settle.xVals || {}).forEach(v => { for (const k of ['vals', 'errs']) if (v[k] && o in v[k]) { v[k][x.name] = v[k][o]; delete v[k][o]; } });
+      Object.values(S.settle.xVals || {}).forEach(v => { for (const k of ['vals', 'errs', 'cnt']) if (v[k] && o in v[k]) { v[k][x.name] = v[k][o]; delete v[k][o]; } });
     }
     S.settle.xItems = items;
     closeModal(); commit();
