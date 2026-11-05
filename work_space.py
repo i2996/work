@@ -1084,6 +1084,17 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 .fm-dl:first-of-type{border-top:0;padding-top:2px}
 .fm-dlh{display:flex;align-items:center;gap:8px}
 .fm-dlh b{font-size:14px}
+/* 마감 기한 접기: 한 줄 요약을 누르면 자세한 내용이 펼쳐짐 */
+.fm-dlsum{display:flex;align-items:center;gap:8px;width:calc(100% + 16px);padding:6px 8px;margin:0 -8px;border:0;background:transparent;border-radius:10px;text-align:left;cursor:pointer;color:var(--text)}
+.fm-dlsum:hover{background:rgba(224,144,58,.08)}
+.fm-dlsum b{font-size:14px;flex:none}
+.fm-dlsum .dt{font-size:15px;font-weight:700;flex:1;min-width:0}
+.fm-dlsum .dt.muted{color:var(--faint);font-weight:600}
+.fm-dlsum .ok{color:#3c8f69;font-size:12px;font-weight:700;flex:none}
+.fm-dlsum .bad{color:var(--pink-ink);font-size:12px;font-weight:700;flex:none}
+.fm-dlsum .arr{flex:none;color:var(--muted);font-size:11px;transition:transform .15s}
+.fm-dl.open .fm-dlsum .arr{transform:rotate(90deg)}
+.fm-dlbody{padding:4px 0 2px}
 .fm-items{font-size:11px;color:#a08a55;margin-top:4px;line-height:1.6;word-break:break-all}
 
 /* 회사명 */
@@ -1686,7 +1697,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'sum', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, combo: null, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, combo: null, dlOpen: new Set(), editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -2090,6 +2101,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
     dlAdd() { openDeadline(0); },
+    dlToggle(el) { const id = Number(el.dataset.id); if (ui.dlOpen.has(id)) ui.dlOpen.delete(id); else ui.dlOpen.add(id); renderPanel(); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
     dlSave(el) {
       const { r, f, read, g } = dlForm; read();
@@ -2795,15 +2807,21 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!c.deadlines.length) h += '<div class="fm-big muted">아직 정해지지 않았어요</div><div class="fm-rule">마감 규칙이 아직 설정되지 않아서 날짜를 임의로 정하지 않았어요. 마감 기한을 추가하고 규칙을 설정해 주세요.</div>';
     for (const d of c.deadlines) {
       const diff = d.date && (d.date.getFullYear() * 12 + d.date.getMonth() !== c.y * 12 + c.m - 1);
-      h += '<div class="fm-dl"><div class="fm-dlh"><b>' + esc(d.name) + '</b><span class="fm-bm">' + (d.source === 'manual' ? '이번만 직접 지정' : d.source === 'rule' ? '설정한 규칙으로 계산' : '계산할 수 없어요') + '</span></div>' +
-        (d.date ? '<div class="fm-big">' + L.fmtFull(d.date) + '</div><div class="fm-chk ' + (d.ok ? 'ok' : 'bad') + '">' + (d.ok ? '✓ 날짜·요일 검증 완료' : '⚠ 날짜·요일이 맞지 않아요') + '</div>'
-          : '<div class="fm-big muted">규칙을 확인해 주세요</div>') +
+      const open = ui.dlOpen.has(d.id), src = d.source === 'manual' ? '이번만 직접 지정' : d.source === 'rule' ? '설정한 규칙으로 계산' : '계산할 수 없어요';
+      // 접힌 상태: 이름 · 날짜 · 검증 결과만 한 줄로
+      h += '<div class="fm-dl' + (open ? ' open' : '') + '"><button type="button" class="fm-dlsum" data-act="dlToggle" data-id="' + d.id + '" title="' + (open ? '접기' : '눌러서 규칙·항목·버튼 보기') + '">' +
+        '<b>' + esc(d.name) + '</b><span class="dt' + (d.date ? '' : ' muted') + '">' + (d.date ? L.fmtFull(d.date) : '규칙을 확인해 주세요') + '</span>' +
+        (d.date ? (d.ok ? '<span class="ok">✓ 검증</span>' : '<span class="bad">⚠ 확인 필요</span>') : '') +
+        (d.source === 'manual' ? '<span class="tag adj">직접 지정</span>' : '') + '<span class="arr">▶</span></button>';
+      if (!open) { h += '</div>'; continue; }
+      h += '<div class="fm-dlbody"><div class="fm-dlh"><span class="fm-bm">' + src + '</span></div>' +
+        (d.date ? '<div class="fm-chk ' + (d.ok ? 'ok' : 'bad') + '">' + (d.ok ? '✓ 날짜·요일 검증 완료' : '⚠ 날짜·요일이 맞지 않아요') + '</div>' : '') +
         '<div class="fm-rule">규칙: ' + esc(L.describeRule(d.rule) || '없음') + '</div>' +
         (diff ? '<div class="fm-diff">※ 정산 대상 월(' + c.m + '월)과 마감 기한의 월(' + (d.date.getMonth() + 1) + '월)은 달라요</div>' : '') +
         '<div class="fm-items">안내문 항목: ' + L.deadlineTokenNames(d.name).map(n => '{' + n + '}').join(' ') + '</div>' +
         '<div class="fm-acts"><button class="btn" data-act="ruleEdit" data-id="' + d.id + '">규칙 변경</button><button class="btn" data-act="manualSet" data-id="' + d.id + '">이번만 직접 지정</button>' +
         (d.source === 'manual' ? '<button class="btn" data-act="manualClear" data-id="' + d.id + '">직접 지정 해제</button>' : '') +
-        '<button class="btn danger" data-act="dlDel" data-id="' + d.id + '">삭제</button></div></div>';
+        '<button class="btn danger" data-act="dlDel" data-id="' + d.id + '">삭제</button></div></div></div>';
     }
     h += '<div class="fm-acts"><button class="btn primary" data-act="dlAdd">＋ 마감 기한 추가</button></div></div></div>';
     /* 안내문 양식 목록 + 미리보기 */
