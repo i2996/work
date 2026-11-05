@@ -1630,7 +1630,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
-  const ui = { tab: 'prog', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
+  const ui = { tab: 'sum', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
     statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'xlsx', noticeId: 0, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
@@ -2380,30 +2380,54 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* ── 탭 ── */
   function renderTabs() {
     const host = $('#tabs'); if (!host) return;
-    const n = L.doingList().length;
-    host.innerHTML = [['prog', '진행'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['form', '양식'], ['stat', '통계']].map(([k, name]) =>
+    const n = summaryGroups().count;
+    host.innerHTML = [['sum', '업무 요약'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['form', '양식'], ['stat', '통계']].map(([k, name]) =>
       '<button class="tab ' + (ui.tab === k ? 'active' : '') + '" data-act="tab" data-tab="' + k + '">' + name +
-      (k === 'prog' ? '<span class="cnt">' + n + '</span>' : '') + '</button>').join('');
+      (k === 'sum' ? '<span class="cnt">' + n + '</span>' : '') + '</button>').join('');
   }
   function renderPanel() {
     const p = $('#panel'); if (!p) return;
     const sc = p.scrollTop;
-    p.innerHTML = ({ prog: viewProg, all: viewAll, cal: viewCal, log: viewLog, form: viewForm, stat: viewStats })[ui.tab]();
+    p.innerHTML = ({ sum: viewSum, all: viewAll, cal: viewCal, log: viewLog, form: viewForm, stat: viewStats })[ui.tab]();
     p.scrollTop = sc;
   }
 
-  /* 진행 */
-  function viewProg() {
-    const list = L.doingList();
-    let h = '<div class="sec-head"><div><h2>진행</h2><div class="sub">지금 하고 있는 업무예요 · 시작은 \'전체 조회\'에서 해요</div></div></div>';
-    if (!list.length) return h + '<div class="empty"><div><b>진행 중인 업무가 없어요</b>전체 조회에서 \'진행\' 버튼을 누르면 여기에 나타나요</div></div>';
-    h += '<div class="table"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>';
-    for (const o of list) {
-      h += '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + '<button class="action sub" data-act="substitute" data-key="' + o.key + '" title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button><button class="action finish" data-act="finish" data-key="' + o.key + '">✓ 완료</button>' +
-        '<button class="undo" data-act="reset" data-key="' + o.key + '" title="시작을 취소하고 시작 전으로 되돌려요">취소</button></div></div>';
-    }
-    return h + '</div>';
+  /* 업무 요약: 지연 · 진행 · 마감까지 7일 미만 (한 업무는 한 곳에만) */
+  function summaryGroups() {
+    const t = today(), seen = new Set();
+    const pick = arr => arr.filter(o => !seen.has(o.key) && seen.add(o.key));
+    const late = pick(L.lateList());
+    const doing = pick(L.doingList());
+    const soon = pick(L.occRange(t, addDays(t, 6), { noTodos: true })
+      .filter(o => stOf(o.key) === 'todo' && diffDays(o.end, t) >= 0 && diffDays(o.end, t) < 7).sort(L.byEnd));
+    return { late, doing, soon, count: late.length + doing.length + soon.length };
+  }
+  function sumRow(o) {
+    const st = stOf(o.key), k = ' data-key="' + o.key + '"';
+    const acts = st === 'doing'
+      ? ppBtn(o) + '<button class="action sub" data-act="substitute"' + k + ' title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button><button class="action finish" data-act="finish"' + k + '>✓ 완료</button>' +
+        '<button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>'
+      : ppBtn(o) + stateCell(o);
+    return '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
+      '</div><div class="c-m">' + dueCell(o) + dTag(o) + '</div><div class="c-a">' + acts + '</div></div>';
+  }
+  /* 마감까지 3~6일 남은 업무에도 D-n 표시 (0~2일은 dueCell 이 이미 표시) */
+  function dTag(o) {
+    const n = diffDays(o.end, today());
+    return stOf(o.key) !== 'done' && n >= 3 && n < 7 ? '<span class="tag" style="background:#efedf6;color:#7b7896">D-' + n + '</span>' : '';
+  }
+  function viewSum() {
+    const g = summaryGroups();
+    let h = '<div class="sec-head"><div><h2>업무 요약</h2><div class="sub">지연 ' + g.late.length + ' · 진행 ' + g.doing.length + ' · 마감 7일 미만 ' + g.soon.length +
+      ' · 한 업무는 위쪽 묶음에 한 번만 보여요</div></div></div>';
+    if (!g.count) return h + '<div class="empty"><div><b>지금 챙길 업무가 없어요</b>지연·진행 중이거나 마감이 7일 안에 다가온 업무가 여기에 모여요</div></div>';
+    const sec = (title, cls, list, desc) => list.length
+      ? '<div class="grp-t ' + cls + '">' + title + ' ' + list.length + '건<span style="font-weight:500;margin-left:6px">' + desc + '</span></div>' +
+        '<div class="table" style="margin-bottom:6px"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>' + list.map(sumRow).join('') + '</div>'
+      : '';
+    return h + sec('지연', 'late', g.late, '마감이 지났는데 완료하지 않은 업무 (최근 7일)') +
+      sec('진행', '', g.doing, '지금 하고 있는 업무') +
+      sec('마감 7일 미만', '', g.soon, '아직 시작하지 않았고 마감이 7일 안에 다가온 업무');
   }
 
   /* 전체 조회 */
