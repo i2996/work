@@ -1738,10 +1738,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<button class="btn" data-act="rtEdit" data-id="' + o.id + '">수정</button>' +
           xb('dayDelRT', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
       }
-      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 할 일 추가"><input id="dayDue" type="date" class="dueIn" title="기한 (선택)" min="' + ds + '"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
-        '<div class="hint2" style="margin:-2px 0 4px">오른쪽 날짜는 기한(선택)이에요. 정하면 그 날까지 TO-DO와 달력에 이어서 떠요.</div>' +
-        '<div class="modal-actions"><button class="btn" data-act="newEvent" data-date="' + ds + '">＋ 일정</button><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일 (반복 설정)</button>' +
-        '<button class="btn primary" data-act="newTask" data-date="' + ds + '">＋ 업무 등록</button>' +
+      h += '</div><div class="quick"><input id="dayIn" placeholder="이 날짜에 업무 등록 (업무명 입력 후 Enter)"><input id="dayDue" type="date" class="dueIn" title="마감일 (선택)" min="' + ds + '"><button data-act="dayAdd" data-date="' + ds + '">＋</button></div>' +
+        '<div class="hint2" style="margin:-2px 0 4px">이번만 하는 업무로 바로 등록돼요. 오른쪽 날짜는 마감일(선택)이에요. 비우면 이 날 하루짜리 업무예요.<br>할 일·반복·세부 업무는 아래 버튼으로 등록해요.</div>' +
+        '<div class="modal-actions"><button class="btn" data-act="newEvent" data-date="' + ds + '">＋ 일정</button><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일</button>' +
+        '<button class="btn" data-act="newTask" data-date="' + ds + '">＋ 업무 자세히 등록</button>' +
         '<button class="btn" data-act="mClose">닫기</button></div>';
       return h;
     }, true);
@@ -2260,7 +2260,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     dayAdd(el) {
       const inp = $('#dayIn'), v = inp.value.trim(); if (!v) return;
       const date = el.dataset.date || curDayDate(); let due = ($('#dayDue') || {}).value || ''; if (due && due <= date) due = '';
-      S.todos.push({ id: S.next_id++, text: v, date, due, done: false }); commit();
+      // 이번만 하는 업무로 등록 (직접 고른 날짜가 휴일이어도 그대로 유지)
+      const end = due || date;
+      S.tasks.push({ id: S.next_id++, title: v, type: 'once', a: 25, b: 28, time: '', start: date, end, adjust: !(L.isOff(P(date)) || L.isOff(P(end))), holiday: 'prev', subs: [], logSubs: true });
+      commit();
     },
     tdToggle(el) { const t = S.todos.find(x => String(x.id) === el.dataset.id); if (t) { t.done = !t.done; commit(); } },
     tdDel(el) { S.todos = S.todos.filter(x => String(x.id) !== el.dataset.id); commit(); },
@@ -2381,7 +2384,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function renderTabs() {
     const host = $('#tabs'); if (!host) return;
     const n = summaryGroups().count;
-    host.innerHTML = [['sum', '업무 요약'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['form', '양식'], ['stat', '통계']].map(([k, name]) =>
+    host.innerHTML = [['sum', '요약'], ['all', '전체 조회'], ['cal', '업무 달력'], ['log', '근무일지'], ['form', '양식'], ['stat', '통계']].map(([k, name]) =>
       '<button class="tab ' + (ui.tab === k ? 'active' : '') + '" data-act="tab" data-tab="' + k + '">' + name +
       (k === 'sum' ? '<span class="cnt">' + n + '</span>' : '') + '</button>').join('');
   }
@@ -2392,7 +2395,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     p.scrollTop = sc;
   }
 
-  /* 업무 요약: 지연 · 진행 · 마감까지 7일 미만 (한 업무는 한 곳에만) */
+  /* 요약: 지연 · 진행 · 마감까지 7일 미만 (한 업무는 한 곳에만) */
   function summaryGroups() {
     const t = today(), seen = new Set();
     const pick = arr => arr.filter(o => !seen.has(o.key) && seen.add(o.key));
@@ -2418,7 +2421,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
   function viewSum() {
     const g = summaryGroups();
-    let h = '<div class="sec-head"><div><h2>업무 요약</h2><div class="sub">지연 ' + g.late.length + ' · 진행 ' + g.doing.length + ' · 마감 7일 미만 ' + g.soon.length +
+    let h = '<div class="sec-head"><div><h2>요약</h2><div class="sub">지연 ' + g.late.length + ' · 진행 ' + g.doing.length + ' · 마감 7일 미만 ' + g.soon.length +
       ' · 한 업무는 위쪽 묶음에 한 번만 보여요</div></div></div>';
     if (!g.count) return h + '<div class="empty"><div><b>지금 챙길 업무가 없어요</b>지연·진행 중이거나 마감이 7일 안에 다가온 업무가 여기에 모여요</div></div>';
     const sec = (title, cls, list, desc) => list.length
