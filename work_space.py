@@ -294,6 +294,54 @@ def xlsx_inspect(path, kind):
     return {"ok": True, "path": path, "name": os.path.splitext(os.path.basename(path))[0], "sheets": sheets, "warnings": warn}
 
 
+def xlsx_read_cells(path, items):
+    """매달 새 엑셀 파일에서 정해 둔 시트·칸의 값만 읽어 옴 (이 PC 안에서만, 파일은 고치지 않음).
+    items: [{"sheet": 시트명, "cell": "D5"}] → values: [{"v": 값} 또는 {"err": 안내}]"""
+    if openpyxl is None:
+        return {"ok": False, "message": "엑셀 처리 라이브러리(openpyxl)를 찾지 못했어요. 프로그램을 최신 버전으로 업데이트해 주세요."}
+    path = os.path.abspath(path or "")
+    low = path.lower()
+    if low.endswith(".xls"):
+        return {"ok": False, "message": "예전 형식(.xls) 파일은 읽을 수 없어요. 엑셀에서 .xlsx 로 저장한 뒤 골라 주세요."}
+    if not low.endswith(XLSX_EXT):
+        return {"ok": False, "message": "엑셀 파일(.xlsx, .xlsm)을 골라 주세요."}
+    if not os.path.isfile(path):
+        return {"ok": False, "message": "파일을 찾을 수 없어요. 파일을 옮겼다면 '엑셀 파일에서 읽기'로 다시 골라 주세요."}
+    from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)   # data_only: 수식이 아니라 저장된 결과값
+    except zipfile.BadZipFile:
+        return {"ok": False, "message": "엑셀 파일을 읽을 수 없어요. 암호가 걸려 있거나 손상된 파일일 수 있어요. 암호가 걸린 파일은 읽을 수 없어요."}
+    except Exception as e:
+        return {"ok": False, "message": "엑셀 파일을 읽지 못했어요: %s" % e}
+    out = []
+    try:
+        for it in items or []:
+            sheet, cell = str(it.get("sheet") or "").strip(), str(it.get("cell") or "").strip().upper()
+            if sheet not in wb.sheetnames:
+                out.append({"err": "'%s' 시트가 없어요" % sheet})
+                continue
+            try:
+                col, row = coordinate_from_string(cell)
+                v = wb[sheet].cell(row=row, column=column_index_from_string(col)).value
+            except Exception:
+                out.append({"err": "'%s' 칸 주소가 올바르지 않아요" % cell})
+                continue
+            if v is None or (isinstance(v, str) and not v.strip()):
+                out.append({"err": "%s!%s 칸이 비어 있어요 (수식이면 엑셀에서 한 번 저장해 주세요)" % (sheet, cell)})
+            elif isinstance(v, bool):
+                out.append({"v": "TRUE" if v else "FALSE"})
+            elif isinstance(v, (int, float)):
+                out.append({"v": int(v) if float(v).is_integer() else v})
+            elif isinstance(v, (_dt.datetime, _dt.date)):
+                out.append({"v": v.strftime("%Y-%m-%d")})
+            else:
+                out.append({"v": str(v).strip()})
+    finally:
+        wb.close()
+    return {"ok": True, "path": path, "file": os.path.basename(path), "values": out}
+
+
 def _unique_title(wb, name):
     base = _BAD_SHEET_CHARS.sub("_", name).strip() or "양식"
     base = base[:31]
@@ -1149,6 +1197,17 @@ mark.tk-a{background:#fbe3d6;color:#9a4a1f}
 .fm-amt small{font-size:12px;font-weight:700;color:#7d7b95}
 .fm-amt input{width:150px;padding:8px 10px;font-size:14px;font-weight:600;text-align:right}
 .fm-amt input.cnt{width:90px}
+.fm-xv{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin:-4px 0 12px}
+.fm-xv div{display:flex;justify-content:space-between;gap:8px;padding:7px 11px;border-radius:10px;background:#f3f8f0;font-size:13px}
+.fm-xv b{font-weight:600;color:#4c6b3c;word-break:break-all;min-width:0}
+.fm-xv span{font-weight:700;white-space:nowrap}
+.fm-xv .bad{background:var(--pink-soft)}.fm-xv .bad span{color:var(--pink-ink);font-weight:600;font-size:12px;white-space:normal;text-align:right}
+mark.tk-e{background:#e1f1d8;color:#3d6b2a}
+.chip.tkb-e{border-color:#cde5c0;background:#f1f9ec;color:#3d6b2a}
+.tkl.e{background:#5f9a45}
+.xi-row{display:grid;grid-template-columns:1.4fr 1fr 80px 30px;gap:6px;align-items:center;margin-bottom:6px}
+.xi-row input{padding:7px 9px;font-size:13px}
+.xi-head{display:grid;grid-template-columns:1.4fr 1fr 80px 30px;gap:6px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}
 .fm-amt .tot{min-width:150px;padding:8px 10px;font-size:14px;font-weight:700;text-align:right;background:#f6f5fa;border-radius:10px;color:var(--text)}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
@@ -1493,7 +1552,9 @@ const WSLogic = (function () {
     s.settle.company = typeof s.settle.company === 'string' ? s.settle.company : '';
     s.settle.taskName = typeof s.settle.taskName === 'string' ? s.settle.taskName : '';
     s.settle.dueTime = typeof s.settle.dueTime === 'string' ? s.settle.dueTime : '';
-    if (!s.settle.amounts || typeof s.settle.amounts !== 'object' || Array.isArray(s.settle.amounts)) s.settle.amounts = {};   // 정산 대상 월('2026-11')마다 {cnt, supply, tax}
+    if (!s.settle.amounts || typeof s.settle.amounts !== 'object' || Array.isArray(s.settle.amounts)) s.settle.amounts = {};
+    if (!Array.isArray(s.settle.xItems)) s.settle.xItems = [];   // 엑셀에서 읽을 항목 [{id, name, sheet, cell}]
+    if (!s.settle.xVals || typeof s.settle.xVals !== 'object' || Array.isArray(s.settle.xVals)) s.settle.xVals = {};   // 정산 대상 월마다 {vals, errs, file, path, at}   // 정산 대상 월('2026-11')마다 {cnt, supply, tax}
     s.rdone = s.rdone || {};
     s.skip = s.skip || {};
     s.extra_off = s.extra_off || [];
@@ -1645,6 +1706,7 @@ const WSLogic = (function () {
     const segs = [], unknown = [], missing = [], undefinedDeadlines = [];
     let missingCompany = false, missingTask = false, missingTime = false;
     const amounts = v.amounts || {}, missingAmounts = [];
+    const xnames = new Set(v.xnames || []), xvals = v.xvals || {}, missingExcel = [];   // 엑셀에서 읽어 오는 항목
     const company = String(v.company == null ? '' : v.company).trim();
     const task = String(v.task == null ? '' : v.task).trim();
     const dueTime = String(v.time == null ? '' : v.time).trim();
@@ -1652,6 +1714,7 @@ const WSLogic = (function () {
     let last = 0, m;
     body = String(body == null ? '' : body);
     const resolve = name => {
+      if (xnames.has(name)) return { g: 'e' };
       if (name === COMPANY_TOKEN) return { g: 'c' };
       if (name === TASK_TOKEN) return { g: 'w' };
       if (name === TIME_TOKEN) return { g: 'h' };
@@ -1681,6 +1744,10 @@ const WSLogic = (function () {
       } else if (def.g === 'h') {
         if (dueTime) segs.push({ t: 'tok', v: dueTime, k: 'h', name });
         else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); missingTime = true; }
+      } else if (def.g === 'e') {
+        const xv = xvals[name];
+        if (xv != null && xv !== '') segs.push({ t: 'tok', v: String(xv), k: 'e', name });
+        else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); if (!missingExcel.includes(name)) missingExcel.push(name); }
       } else if (def.g === 'a') {
         const av = amounts[name];
         if (av != null && av !== '') segs.push({ t: 'tok', v: String(av), k: 'a', name });
@@ -1691,7 +1758,7 @@ const WSLogic = (function () {
       last = m.index + m[0].length;
     }
     if (last < body.length) segs.push({ t: 'text', v: body.slice(last) });
-    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines, missingCompany, missingTask, missingTime, missingAmounts };
+    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines, missingCompany, missingTask, missingTime, missingAmounts, missingExcel };
   }
 
   function setState(s) { ctx.S = s; }
@@ -2120,6 +2187,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     twInput(el) { S.settle.taskName = el.value; persist(); refreshNoticePreview(); },
     amInput(el) { setAmount(el.dataset.f, el.value); persist(); refreshAmounts(); refreshNoticePreview(); },
     amChange(el) { setAmount(el.dataset.f, el.value); commitSoon(); },
+    xvItems() { openXItems(); },
+    xvPick() { xvRead(''); },
+    xvReload() { const c = calcSettle(), xv = S.settle.xVals[amtKey(c.y, c.m)]; xvRead(xv && xv.path || ''); },
+    xvClear() { const c = calcSettle(); delete S.settle.xVals[amtKey(c.y, c.m)]; commit(); },
+    xiAdd() { xiForm.read(); xiForm.items.push({ id: S.next_id++, name: '', sheet: xiForm.items.length ? xiForm.items[xiForm.items.length - 1].sheet : '', cell: '' }); curModal.refresh(); const ins = curModal.el.querySelectorAll('.xi-name'); if (ins.length) ins[ins.length - 1].focus(); },
+    xiDel(el) { xiForm.read(); xiForm.items.splice(Number(el.dataset.i), 1); curModal.refresh(); },
+    xiSave() { xiSave(); },
     amClear() { const c = calcSettle(); delete S.settle.amounts[amtKey(c.y, c.m)]; commit(); },
     tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
@@ -2129,7 +2203,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     dlSave(el) {
       const { r, f, read, g } = dlForm; read();
       const id = Number(el.dataset.id), name = (f.name || '').trim();
-      const e = L.validateDeadlineName(name, S.settle.deadlines, id) || L.ruleValid(r);
+      const xHit = L.deadlineTokenNames(name).find(t => (S.settle.xItems || []).some(x => x.name === t));
+      const e = L.validateDeadlineName(name, S.settle.deadlines, id) || (xHit ? '"{' + xHit + '}" 항목이 엑셀 금액 항목과 겹쳐요. 다른 이름을 써 주세요.' : '') || L.ruleValid(r);
       if (e) { g('rErr').textContent = e; return; }
       const out = { type: r.type };
       if (r.type === 'fixed') { out.monthOffset = parseInt(r.monthOffset, 10); out.day = r.day === 'last' ? 'last' : parseInt(r.day, 10); out.adjust = r.adjust || 'none'; }
@@ -2830,7 +2905,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     });
     const map = {}; deadlines.forEach(d => { map[d.name] = d.date; });
     return { y, m, period, deadlines, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amt: amountsOf(y, m),
-      vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amounts: amountsOf(y, m).text } };
+      vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amounts: amountsOf(y, m).text,
+        xnames: (st.xItems || []).map(x => x.name), xvals: ((st.xVals || {})[amtKey(y, m)] || {}).vals || {} } };
   }
   function noticeBlockers(body, c, html) {
     const f = L.fillNotice(body, c.vars), b = [];
@@ -2841,6 +2917,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (f.undefinedDeadlines.length) b.push('아직 만들지 않은 마감 기한이에요: ' + f.undefinedDeadlines.map(n => '"' + n + '"').join(', ') + ' · 마감 기한을 추가해 주세요.');
     if (f.missingCompany) b.push('이 안내문에는 {회사명} 항목이 있어요. 위의 회사명 칸에 회사 이름을 입력해 주세요.');
     if (f.missingTask) b.push('이 안내문에는 {업무명} 항목이 있어요. 위의 업무명 칸에 업무 이름을 입력해 주세요.');
+    if (f.missingExcel.length) b.push('엑셀에서 읽는 항목(' + f.missingExcel.map(n => '{' + n + '}').join(', ') + ')의 값이 없어요. 위의 \'엑셀 파일에서 읽기\'로 이번 달 파일을 골라 주세요.');
     if (f.missingAmounts.length) b.push('이 안내문에는 ' + f.missingAmounts.map(n => '{' + n + '}').join(', ') + ' 항목이 있어요. 위의 정산 금액 칸에 숫자를 입력해 주세요.');
     if (f.missingTime) b.push('이 안내문에는 {마감시간} 항목이 있어요. 위의 마감 시간 칸에 시간을 입력해 주세요.');
     if (f.unknown.length) b.push('알 수 없는 항목이 있어요: ' + f.unknown.join(', ') + ' · 양식을 수정해 주세요.');
@@ -2892,6 +2969,20 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<small>총액</small><span class="tot" id="amTotal">' + (a.total === '' ? '-' : comma(a.total)) + '</span></span>' +
       (a.cnt !== '' || a.supply !== '' || a.taxManual ? '<button class="btn" data-act="amClear" title="이 달 정산 금액을 모두 지워요">지우기</button>' : '') +
       '<span class="fm-hint">' + c.m + '월분 숫자로 따로 저장돼요 · 세액은 비워 두면 공급가의 10%(원 미만 버림), 다르면 직접 입력 · 총액 = 공급가 + 세액</span></div>';
+    /* 엑셀에서 읽어 오는 금액 (매달 새 파일이어도 시트·칸이 같으면 그대로 읽어요) */
+    const xi = S.settle.xItems || [], xv = (S.settle.xVals || {})[amtKey(c.y, c.m)];
+    h += '<div class="fm-sel"><span class="fm-lab">엑셀 금액</span>' +
+      (xi.length ? '<button class="btn primary" data-act="xvPick">엑셀 파일에서 읽기</button>' + (xv && xv.path ? '<button class="btn" data-act="xvReload" title="' + esc(xv.path) + '">다시 읽기</button>' : '') : '') +
+      '<button class="btn" data-act="xvItems">' + (xi.length ? '항목 설정 (' + xi.length + '개)' : '＋ 엑셀에서 읽을 항목 만들기') + '</button>' +
+      (xv && xv.vals && Object.keys(xv.vals).length ? '<button class="btn" data-act="xvClear" title="이 달에 읽어 온 값을 지워요">지우기</button>' : '') +
+      '<span class="fm-hint">' + (xi.length ? (xv ? c.m + '월분: ' + esc(xv.file || '') + ' · ' + esc(xv.at || '') + ' 읽음' : c.m + '월분은 아직 읽지 않았어요 · 정한 칸의 값만 읽고, 파일은 이 PC 밖으로 나가지 않아요')
+        : '엑셀 파일의 시트·칸을 정해 두면 매달 파일만 골라서 금액을 한 번에 채워요') + '</span></div>';
+    if (xi.length && xv) {
+      h += '<div class="fm-xv">' + xi.map(it => {
+        const val = (xv.vals || {})[it.name], err = (xv.errs || {})[it.name];
+        return '<div class="' + (val ? '' : 'bad') + '" title="' + esc(it.sheet + '!' + it.cell) + '"><b>' + esc(it.name) + '</b><span>' + esc(val || err || '값 없음') + '</span></div>';
+      }).join('') + '</div>';
+    }
     /* 정산 대상 기간 */
     h += '<div class="fm-calc"><div class="fm-box s"><div class="fm-bt"><span class="fm-badge s">정산 대상</span><span class="fm-bm">' + c.y + '년 ' + c.m + '월분</span></div>' +
       '<div class="fm-k">정산 대상 기간</div><div class="fm-big">' + L.fmtFull(p.start) + ' ~ ' + L.fmtFull(p.end) + '</div>' +
@@ -2928,7 +3019,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!cur) return h + '<div class="empty" style="min-height:170px"><div><b>등록된 안내문 양식이 없어요</b>자주 쓰는 안내문을 등록해 두면 날짜만 자동으로 채워서 바로 복사할 수 있어요</div></div>';
     const { blockers } = noticeBlockers(cur.body, c, noticeHtml(cur));
     const prev = fillHtml(noticeHtml(cur), c.vars, true).html;
-    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark><mark class="tk tk-w">업무명</mark><mark class="tk tk-h">마감 시간</mark><mark class="tk tk-a">정산 금액</mark></span><span class="sp"></span>' +
+    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark><mark class="tk tk-w">업무명</mark><mark class="tk tk-h">마감 시간</mark><mark class="tk tk-a">정산 금액</mark><mark class="tk tk-e">엑셀 금액</mark></span><span class="sp"></span>' +
       '<button class="btn primary" data-act="noticeCopy" data-id="' + cur.id + '"' + (blockers.length ? ' disabled' : '') + '>안내문 복사</button>' +
       '<button class="btn" data-act="noticeEdit" data-id="' + cur.id + '">수정</button><button class="btn danger" data-act="noticeDel" data-id="' + cur.id + '">삭제</button></div>' +
       '<div id="noticeBlk">' + (blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '') + '</div>' +
@@ -2999,6 +3090,70 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   document.addEventListener('input', e => { if (ui.combo && e.target.closest && e.target.closest('.combo')) comboShow(null); });
   document.addEventListener('keydown', e => { if (e.key === 'Tab' && ui.combo) comboShow(null); if (e.key === 'Escape' && ui.combo) comboShow(null); if (e.key === 'Enter' && ui.combo && e.target.closest && e.target.closest('.combo')) { comboShow(null); e.target.blur(); } });
 
+  /* ── 엑셀에서 읽어 오는 금액 ── */
+  const xFmt = v => (typeof v === 'number' ? v.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) : String(v == null ? '' : v));
+  async function xvRead(path) {
+    const items = S.settle.xItems || [];
+    if (!items.length) return openXItems();
+    if (!hasPy() || !api().xlsx_read_cells) return infoModal('사용할 수 없어요', '엑셀 파일 읽기는 WorkSpace.exe 로 실행할 때만 사용할 수 있어요.');
+    let res;
+    try { res = await api().xlsx_read_cells(path, items.map(x => ({ sheet: x.sheet, cell: x.cell }))); } catch (e) { res = { ok: false, message: String(e) }; }
+    if (!res || res.cancelled) return;
+    if (!res.ok) return infoModal('엑셀 파일을 읽지 못했어요', res.message || '');
+    const c = calcSettle(), vals = {}, errs = {};
+    items.forEach((x, i) => { const r = (res.values || [])[i] || {}; if (r.err) errs[x.name] = r.err; else vals[x.name] = xFmt(r.v); });
+    S.settle.xVals[amtKey(c.y, c.m)] = { vals, errs, file: res.file, path: res.path, at: iso(today()) };
+    commit();
+    const bad = Object.entries(errs);
+    if (bad.length) infoModal('읽지 못한 칸이 있어요', bad.map(([n, e]) => '· ' + n + ': ' + e).join('\n') + '\n\n시트 이름과 칸 주소를 \'항목 설정\'에서 확인해 주세요.');
+  }
+  /* 항목 설정: 이름(안내문 항목) · 시트 · 칸 */
+  let xiForm = null;
+  function openXItems() {
+    xiForm = { items: JSON.parse(JSON.stringify(S.settle.xItems || [])) };
+    if (!xiForm.items.length) xiForm.items.push({ id: S.next_id++, name: '', sheet: '', cell: '' });
+    const M = openModal(() => '<h3>엑셀에서 읽을 항목</h3><p class="hint2">항목 이름은 안내문에 <b>{이름}</b>으로 넣어요. 매달 새 파일이어도 시트 이름과 칸 주소가 같으면 그대로 읽어요.<br>정한 칸의 값만 읽고, 다른 칸(주민번호 등)은 읽거나 저장하지 않아요. 암호가 걸린 파일은 읽을 수 없어요.</p>' +
+      '<div class="xi-head"><span>항목 이름 (예: 고용환급금액)</span><span>시트 이름</span><span>칸 (예: D5)</span><span></span></div>' +
+      xiForm.items.map((x, i) => '<div class="xi-row"><input class="xi-name" data-i="' + i + '" data-f="name" value="' + esc(x.name) + '" placeholder="고용환급금액">' +
+        '<input data-i="' + i + '" data-f="sheet" value="' + esc(x.sheet) + '" placeholder="정산">' +
+        '<input data-i="' + i + '" data-f="cell" value="' + esc(x.cell) + '" placeholder="D5">' +
+        '<button type="button" class="xb" data-act="xiDel" data-i="' + i + '" title="삭제">✕</button></div>').join('') +
+      '<button type="button" class="btn addsub" data-act="xiAdd">＋ 항목 추가</button>' +
+      '<div class="err" id="xiErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xiSave">저장</button></div>', true);
+    M.el.style.width = 'min(640px,100%)';
+    xiForm.read = () => M.el.querySelectorAll('.xi-row input').forEach(inp => { const x = xiForm.items[Number(inp.dataset.i)]; if (x) x[inp.dataset.f] = inp.value; });
+    setTimeout(() => { const i = M.el.querySelector('.xi-name'); if (i) i.focus(); }, 0);
+  }
+  function xiSave() {
+    xiForm.read();
+    const err = m => { const e = $('#xiErr'); if (e) e.textContent = m; };
+    const items = xiForm.items.map(x => ({ id: x.id, name: (x.name || '').trim(), sheet: (x.sheet || '').trim(), cell: (x.cell || '').trim().toUpperCase().replace(/\$/g, '') }))
+      .filter(x => x.name || x.sheet || x.cell);
+    const reserved = new Set(L.TOKEN_DEFS.map(d => d[0]).concat([L.COMPANY_TOKEN, L.TASK_TOKEN, L.TIME_TOKEN], L.AMOUNT_TOKENS));
+    (S.settle.deadlines || []).forEach(d => L.deadlineTokenNames(d.name).forEach(t => reserved.add(t)));
+    const seen = new Set();
+    for (const x of items) {
+      if (!x.name) return err('항목 이름을 입력해 주세요.');
+      if (/[\s{}]/.test(x.name) || x.name.length > 20) return err('"' + x.name + '": 항목 이름은 띄어쓰기와 { } 없이 20글자 이내로 써 주세요.');
+      if (reserved.has(x.name)) return err('"' + x.name + '"은(는) 이미 있는 항목 이름이에요. 다른 이름을 써 주세요.');
+      if (seen.has(x.name)) return err('"' + x.name + '" 이름이 두 번 있어요.');
+      seen.add(x.name);
+      if (!x.sheet) return err('"' + x.name + '"의 시트 이름을 입력해 주세요.');
+      if (!/^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(x.cell)) return err('"' + x.name + '"의 칸 주소가 올바르지 않아요. (예: D5)');
+    }
+    // 이름을 바꾸면 안내문 속 항목과 이미 읽은 값도 같이 바꿔 줌
+    const old = new Map((S.settle.xItems || []).map(x => [x.id, x.name]));
+    for (const x of items) {
+      const o = old.get(x.id);
+      if (!o || o === x.name) continue;
+      const re = new RegExp('\\{\\s*' + o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\}', 'g');
+      (S.notices || []).forEach(n => { n.body = String(n.body || '').replace(re, '{' + x.name + '}'); if (n.html != null) n.html = n.html.replace(re, '{' + x.name + '}'); });
+      Object.values(S.settle.xVals || {}).forEach(v => { for (const k of ['vals', 'errs']) if (v[k] && o in v[k]) { v[k][x.name] = v[k][o]; delete v[k][o]; } });
+    }
+    S.settle.xItems = items;
+    closeModal(); commit();
+  }
+
   /* 편집기의 커서 위치 기억 (항목·서식 버튼을 눌러도 그 자리에 들어가게) */
   let rtRange = null;
   function rtSave(ed) { const sel = window.getSelection(); if (sel.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer)) rtRange = sel.getRangeAt(0).cloneRange(); }
@@ -3027,6 +3182,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="tkrow"><span class="tkl w">업무</span>' + chips([L.TASK_TOKEN], 'w') + '</div>' +
       '<div class="tkrow"><span class="tkl h">시간</span>' + chips([L.TIME_TOKEN], 'h') + '</div>' +
       '<div class="tkrow"><span class="tkl a">금액</span>' + chips(L.AMOUNT_TOKENS, 'a') + '</div>' +
+      ((S.settle.xItems || []).length ? '<div class="tkrow"><span class="tkl e">엑셀</span>' + chips(S.settle.xItems.map(x => x.name), 'e') + '</div>' : '') +
       dlNames.map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
       '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
@@ -3471,6 +3627,14 @@ class Api:
 
     def xlsx_rows_html(self, file, sheet, rows):
         return xlsx_rows_html(file, sheet, rows)
+
+    def xlsx_read_cells(self, path, items):
+        """path 가 비어 있으면 파일을 고르게 하고, 있으면 그 파일을 다시 읽음"""
+        if not path:
+            path = self._xlsx_dialog()
+            if not path:
+                return {"ok": False, "cancelled": True}
+        return xlsx_read_cells(path, items)
 
     def open_folder(self, path):
         try:
