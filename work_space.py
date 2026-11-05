@@ -1631,7 +1631,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'sum', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'xlsx', noticeId: 0, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -2589,7 +2589,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       (r.count ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
   }
 
-  /* ───────── 양식 (엑셀 양식 · 안내문 양식) ───────── */
+  /* ───────── 양식 (안내문 양식 · 엑셀 양식) ───────── */
   const infoModal = (title, msg, extra) => openModal(() => '<h3>' + esc(title) + '</h3><p class="hint2" style="white-space:pre-line;font-size:13px;color:var(--text)">' + esc(msg) + '</p><div class="modal-actions">' + (extra || '') + '<button class="btn" data-act="mClose">닫기</button></div>');
   const noPy = () => infoModal('사용할 수 없어요', '엑셀 양식 복사는 WorkSpace.exe 로 실행할 때만 사용할 수 있어요.');
   function copyText(text, el, label) {
@@ -2644,10 +2644,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   function viewForm() {
-    const seg = '<div class="seg segsm">' + [['xlsx', '엑셀 양식'], ['notice', '안내문 양식']].map(([v, n]) =>
+    const seg = '<div class="seg segsm">' + [['notice', '안내문'], ['xlsx', '엑셀']].map(([v, n]) =>
       '<button type="button" class="' + (ui.formTab === v ? 'on' : '') + '" data-act="formTab" data-v="' + v + '">' + n + '</button>').join('') + '</div>';
-    return '<div class="sec-head"><div><h2>양식</h2><div class="sub">자주 쓰는 엑셀 양식과 안내문 양식을 등록해 두고 바로 써요 · 모든 처리는 이 PC 안에서만 이뤄져요</div></div>' + seg + '</div>' +
-      (ui.formTab === 'notice' ? viewNotice() : viewXlsx());
+    return '<div class="sec-head"><div><h2>양식</h2><div class="sub">자주 쓰는 안내문 양식과 엑셀 양식을 등록해 두고 바로 써요 · 모든 처리는 이 PC 안에서만 이뤄져요</div></div>' + seg + '</div>' +
+      (ui.formTab === 'xlsx' ? viewXlsx() : viewNotice());
   }
 
   function viewXlsx() {
