@@ -1112,6 +1112,15 @@ mark.tk-w{background:#e9e2f8;color:#5b4697}
 mark.tk-h{background:#dcedfb;color:#1f5f8f}
 .chip.tkb-h{border-color:#c3def4;background:#eef6fd;color:#1f5f8f}
 .tkl.h{background:#3f86c2}
+/* 정산 금액 (건수·공급가·세액·총액) */
+mark.tk-a{background:#fbe3d6;color:#9a4a1f}
+.chip.tkb-a{border-color:#f2cdb8;background:#fdf1ea;color:#9a4a1f}
+.tkl.a{background:#d0763f}
+.fm-amt{display:flex;align-items:center;gap:6px}
+.fm-amt small{font-size:12px;font-weight:700;color:#7d7b95}
+.fm-amt input{width:150px;padding:8px 10px;font-size:14px;font-weight:600;text-align:right}
+.fm-amt input.cnt{width:90px}
+.fm-amt .tot{min-width:150px;padding:8px 10px;font-size:14px;font-weight:700;text-align:right;background:#f6f5fa;border-radius:10px;color:var(--text)}
 '''
 LOGIC_JS = r'''/* WORK SPACE - 날짜/공휴일/반복 업무 계산 (화면과 무관한 순수 로직) */
 const WSLogic = (function () {
@@ -1455,6 +1464,7 @@ const WSLogic = (function () {
     s.settle.company = typeof s.settle.company === 'string' ? s.settle.company : '';
     s.settle.taskName = typeof s.settle.taskName === 'string' ? s.settle.taskName : '';
     s.settle.dueTime = typeof s.settle.dueTime === 'string' ? s.settle.dueTime : '';
+    if (!s.settle.amounts || typeof s.settle.amounts !== 'object' || Array.isArray(s.settle.amounts)) s.settle.amounts = {};   // 정산 대상 월('2026-11')마다 {cnt, supply, tax}
     s.rdone = s.rdone || {};
     s.skip = s.skip || {};
     s.extra_off = s.extra_off || [];
@@ -1568,6 +1578,7 @@ const WSLogic = (function () {
   ];
   const COMPANY_TOKEN = '회사명';   // {회사명} → 안내문 화면에서 입력한 회사 이름
   const TASK_TOKEN = '업무명';      // {업무명} → 안내문 화면에서 입력한 업무 이름
+  const AMOUNT_TOKENS = ['건수', '공급가', '세액', '총액'];   // {건수} 등 → 안내문 화면에서 매달 입력하는 정산 금액
   const TIME_TOKEN = '마감시간';    // {마감시간} → 안내문 화면에서 입력한 마감 시간 (매번 달라서 규칙과 따로)
   /* 마감 기한 항목: 마감 기한의 '이름' 뒤에 붙여 만들어져요. 예) 이름이 '제출' → {제출기한} {제출월일} {제출연도} {제출월} {제출일} {제출요일} */
   const DEFAULT_DL = '마감';
@@ -1579,7 +1590,7 @@ const WSLogic = (function () {
     if (!name) return '마감 기한 이름을 입력해 주세요. (예: 마감, 제출, 확인)';
     if (name.length > 12) return '이름은 12글자 이내로 써 주세요.';
     if (/[\s{}]/.test(name)) return '이름에는 공백이나 { } 를 쓸 수 없어요.';
-    const mine = deadlineTokenNames(name), reserved = new Set(TOKEN_DEFS.map(d => d[0]).concat([COMPANY_TOKEN, TASK_TOKEN, TIME_TOKEN]));
+    const mine = deadlineTokenNames(name), reserved = new Set(TOKEN_DEFS.map(d => d[0]).concat([COMPANY_TOKEN, TASK_TOKEN, TIME_TOKEN], AMOUNT_TOKENS));
     for (const t of mine) if (reserved.has(t)) return '"{' + t + '}" 항목이 정산 대상 항목과 겹쳐요. 다른 이름을 써 주세요.';
     for (const o of list || []) {
       if (o.id === selfId) continue;
@@ -1604,6 +1615,7 @@ const WSLogic = (function () {
     const known = new Set(Object.keys(dl)); known.add(DEFAULT_DL);
     const segs = [], unknown = [], missing = [], undefinedDeadlines = [];
     let missingCompany = false, missingTask = false, missingTime = false;
+    const amounts = v.amounts || {}, missingAmounts = [];
     const company = String(v.company == null ? '' : v.company).trim();
     const task = String(v.task == null ? '' : v.task).trim();
     const dueTime = String(v.time == null ? '' : v.time).trim();
@@ -1614,6 +1626,7 @@ const WSLogic = (function () {
       if (name === COMPANY_TOKEN) return { g: 'c' };
       if (name === TASK_TOKEN) return { g: 'w' };
       if (name === TIME_TOKEN) return { g: 'h' };
+      if (AMOUNT_TOKENS.includes(name)) return { g: 'a' };
       if (smap[name]) return { g: 's', fn: smap[name] };
       for (const [sfx, fn] of DL_SUFFIX) {
         if (name.length > sfx.length && name.endsWith(sfx)) {
@@ -1639,20 +1652,24 @@ const WSLogic = (function () {
       } else if (def.g === 'h') {
         if (dueTime) segs.push({ t: 'tok', v: dueTime, k: 'h', name });
         else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); missingTime = true; }
+      } else if (def.g === 'a') {
+        const av = amounts[name];
+        if (av != null && av !== '') segs.push({ t: 'tok', v: String(av), k: 'a', name });
+        else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); if (!missingAmounts.includes(name)) missingAmounts.push(name); }
       } else if (def.g === 'd' && !dl[def.pre]) {
         segs.push({ t: 'tok', v: m[0], k: 'x', name, dl: def.pre }); if (!missing.includes(m[0])) missing.push(m[0]);
       } else segs.push({ t: 'tok', v: def.g === 'd' ? def.fn(dl[def.pre]) : def.fn(v), k: def.g, name, dl: def.pre });
       last = m.index + m[0].length;
     }
     if (last < body.length) segs.push({ t: 'text', v: body.slice(last) });
-    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines, missingCompany, missingTask, missingTime };
+    return { text: segs.map(x => x.v).join(''), segs, unknown, missing, undefinedDeadlines, missingCompany, missingTask, missingTime, missingAmounts };
   }
 
   function setState(s) { ctx.S = s; }
 
   return { ctx, WD, pad, D, iso, P, addDays, mlen, shiftMonth, today, diffDays, fmtMD, same, setHol, holName, isOff, prevWork,
     ruleOcc, onceSpan, occRange, occByKey, stOf, pinkOf, byEnd, doingList, lateList, startTask, finishTask, subTask, isSub, resetTask,
-    removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, COMPANY_TOKEN, TASK_TOKEN, TIME_TOKEN, DEFAULT_DL, DL_SUFFIX, deadlineTokenNames, validateDeadlineName, renameDeadlineTokens, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
+    removeTask, fmtFull, fmtMDW, weekdayCalc, checkDate, settlePeriod, RULE_TYPES, ADJUSTS, ruleValid, calcDeadline, describeRule, TOKEN_DEFS, COMPANY_TOKEN, TASK_TOKEN, TIME_TOKEN, AMOUNT_TOKENS, DEFAULT_DL, DL_SUFFIX, deadlineTokenNames, validateDeadlineName, renameDeadlineTokens, fillNotice, eventRange, removeEvent, describeEvent, subDoneDate, autoFinish, todoEnd, todoOn, rtodoRange, toggleRT, removeRTodo, skipOcc, nextWork, canPostpone, postponeTask, subsOf, subDone, toggleSub, subCount, activeChecklists, describeTask, migrate, setState };
 })();
 if (typeof module !== 'undefined') module.exports = WSLogic;
 '''
@@ -1686,6 +1703,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     } catch (e) { /* ignore */ }
   }
   function commit() { persist(); render(); }
+  /* 칸에서 다른 칸을 바로 누를 때: 포커스가 새 칸으로 옮겨간 다음에 다시 그려서, 누른 칸에 그대로 입력되게 함 */
+  function commitSoon() { persist(); setTimeout(render, 0); }
 
   /* ── 공통 헬퍼 ── */
   function monthWeeks(y, m) {
@@ -2061,11 +2080,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (c.time) rememberDueTime(c.time);
       if (c.company || c.task || c.time) persist();
     },
-    coChange(el) { S.settle.company = el.value.trim(); rememberCompany(el.value); commit(); },
+    coChange(el) { S.settle.company = el.value.trim(); rememberCompany(el.value); commitSoon(); },
     coInput(el) { S.settle.company = el.value; persist(); refreshNoticePreview(); },
-    twChange(el) { S.settle.taskName = el.value.trim(); rememberTaskName(el.value); commit(); },
+    twChange(el) { S.settle.taskName = el.value.trim(); rememberTaskName(el.value); commitSoon(); },
     twInput(el) { S.settle.taskName = el.value; persist(); refreshNoticePreview(); },
-    tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commit(); },
+    amInput(el) { setAmount(el.dataset.f, el.value); persist(); refreshAmounts(); refreshNoticePreview(); },
+    amChange(el) { setAmount(el.dataset.f, el.value); commitSoon(); },
+    amClear() { const c = calcSettle(); delete S.settle.amounts[amtKey(c.y, c.m)]; commit(); },
+    tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
     dlAdd() { openDeadline(0); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
@@ -2433,8 +2455,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function renderPanel() {
     const p = $('#panel'); if (!p) return;
     const sc = p.scrollTop;
+    // 다시 그려도 입력 중이던 칸(id 가 있는 칸)의 커서를 유지
+    const ae = document.activeElement, fid = ae && ae.id && p.contains(ae) && /^(INPUT|TEXTAREA)$/.test(ae.tagName) ? ae.id : '';
+    let sel = null; try { if (fid) sel = [ae.selectionStart, ae.selectionEnd]; } catch (e) { /* ignore */ }
     p.innerHTML = ({ sum: viewSum, all: viewAll, cal: viewCal, log: viewLog, form: viewForm, stat: viewStats })[ui.tab]();
     p.scrollTop = sc;
+    if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { if (sel) el.setSelectionRange(Math.min(sel[0], el.value.length), Math.min(sel[1], el.value.length)); } catch (e) { /* ignore */ } } }
   }
 
   /* 요약: 지연 · 진행 · 마감까지 7일 미만 (한 업무는 한 곳에만) */
@@ -2660,6 +2686,32 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* 정산 대상 월 · 마감 기한 계산 (마감 기한마다 규칙이 따로 있고, 규칙이 없으면 날짜를 정하지 않음) */
+  /* 정산 금액: 건수·공급가는 입력, 세액은 공급가의 10%(원 단위 미만 버림, 직접 고칠 수 있음), 총액 = 공급가 + 세액 */
+  const amtKey = (y, m) => y + '-' + pad2(m);
+  const toNum = v => { const t = String(v == null ? '' : v).replace(/[^0-9-]/g, ''); return t === '' || t === '-' ? '' : Number(t); };
+  const comma = n => (n === '' || n == null || isNaN(n) ? '' : Number(n).toLocaleString('ko-KR'));
+  function amountsOf(y, m) {
+    const a = (S.settle.amounts || {})[amtKey(y, m)] || {};
+    const cnt = toNum(a.cnt), supply = toNum(a.supply), taxIn = toNum(a.tax);
+    const autoTax = supply === '' ? '' : Math.trunc(supply / 10);
+    const tax = taxIn !== '' ? taxIn : autoTax;
+    const total = supply !== '' && tax !== '' ? supply + tax : '';
+    return { cnt, supply, tax, autoTax, taxManual: taxIn !== '', total, text: { 건수: comma(cnt), 공급가: comma(supply), 세액: comma(tax), 총액: comma(total) } };
+  }
+  function setAmount(field, value) {
+    const c = S.settle, y = c.y || today().getFullYear(), m = c.m || (today().getMonth() + 1), k = amtKey(y, m);
+    c.amounts = c.amounts || {};
+    const a = c.amounts[k] = c.amounts[k] || {};
+    const n = toNum(value);
+    if (n === '') delete a[field]; else a[field] = n;
+    if (!Object.keys(a).length) delete c.amounts[k];
+  }
+  /* 입력하는 동안 자동 세액·총액만 바로 갱신 (칸을 다시 그리지 않아 커서 유지) */
+  function refreshAmounts() {
+    const c = calcSettle(), a = c.amt, tx = $('#amTax'), tot = $('#amTotal');
+    if (tx) tx.placeholder = a.autoTax === '' ? '자동 (공급가의 10%)' : comma(a.autoTax) + ' (자동)';
+    if (tot) tot.textContent = a.total === '' ? '-' : comma(a.total);
+  }
   function calcSettle() {
     const t = today(), st = S.settle || {};
     const y = st.y || t.getFullYear(), m = st.m || (t.getMonth() + 1);
@@ -2672,8 +2724,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return { id: dl.id, name: dl.name, rule: dl.rule, date, source, ok: date ? L.checkDate(date) : null };
     });
     const map = {}; deadlines.forEach(d => { map[d.name] = d.date; });
-    return { y, m, period, deadlines, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(),
-      vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim() } };
+    return { y, m, period, deadlines, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amt: amountsOf(y, m),
+      vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amounts: amountsOf(y, m).text } };
   }
   function noticeBlockers(body, c) {
     const f = L.fillNotice(body, c.vars), b = [];
@@ -2683,6 +2735,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (f.undefinedDeadlines.length) b.push('아직 만들지 않은 마감 기한이에요: ' + f.undefinedDeadlines.map(n => '"' + n + '"').join(', ') + ' · 마감 기한을 추가해 주세요.');
     if (f.missingCompany) b.push('이 안내문에는 {회사명} 항목이 있어요. 위의 회사명 칸에 회사 이름을 입력해 주세요.');
     if (f.missingTask) b.push('이 안내문에는 {업무명} 항목이 있어요. 위의 업무명 칸에 업무 이름을 입력해 주세요.');
+    if (f.missingAmounts.length) b.push('이 안내문에는 ' + f.missingAmounts.map(n => '{' + n + '}').join(', ') + ' 항목이 있어요. 위의 정산 금액 칸에 숫자를 입력해 주세요.');
     if (f.missingTime) b.push('이 안내문에는 {마감시간} 항목이 있어요. 위의 마감 시간 칸에 시간을 입력해 주세요.');
     if (f.unknown.length) b.push('알 수 없는 항목이 있어요: ' + f.unknown.join(', ') + ' · 양식을 수정해 주세요.');
     return { f, blockers: b };
@@ -2725,6 +2778,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<span class="fm-hint">한 번 입력하면 기억해요 · 칸을 누르면 저장된 업무가 모두 보이고, 고르면 바로 바뀌어요</span></div>' +
       '<div class="fm-sel"><span class="fm-lab">마감 시간</span>' + combo('tm', 'stDueTime', c.time, S.dueTimes, '안내문의 {마감시간} 자리에 들어가요 (예: 오후 3시)', 'tmChange', 'tmInput') +
       '<span class="fm-hint">매번 달라지는 시간은 여기서 골라요 · 쓰는 그대로 들어가요 (예: 15:00, 오후 3시, 18시까지)</span></div>';
+    const a = c.amt, ain = (f, cls, val, ph) => '<input class="' + cls + '" inputmode="numeric" data-f="' + f + '" data-inp="amInput" data-chg="amChange" value="' + esc(comma(val)) + '" placeholder="' + esc(ph) + '"' + ' id="' + ({ cnt: 'amCnt', supply: 'amSupply', tax: 'amTax' })[f] + '"' + ' autocomplete="off">';
+    h += '<div class="fm-sel"><span class="fm-lab">정산 금액</span><span class="fm-amt">' +
+      '<small>건수</small>' + ain('cnt', 'cnt', a.cnt, '0') +
+      '<small>공급가</small>' + ain('supply', '', a.supply, '0') +
+      '<small>세액</small>' + ain('tax', '', a.taxManual ? a.tax : '', a.autoTax === '' ? '자동 (공급가의 10%)' : comma(a.autoTax) + ' (자동)') +
+      '<small>총액</small><span class="tot" id="amTotal">' + (a.total === '' ? '-' : comma(a.total)) + '</span></span>' +
+      (a.cnt !== '' || a.supply !== '' || a.taxManual ? '<button class="btn" data-act="amClear" title="이 달 정산 금액을 모두 지워요">지우기</button>' : '') +
+      '<span class="fm-hint">' + c.m + '월분 숫자로 따로 저장돼요 · 세액은 비워 두면 공급가의 10%(원 미만 버림), 다르면 직접 입력 · 총액 = 공급가 + 세액</span></div>';
     /* 정산 대상 기간 */
     h += '<div class="fm-calc"><div class="fm-box s"><div class="fm-bt"><span class="fm-badge s">정산 대상</span><span class="fm-bm">' + c.y + '년 ' + c.m + '월분</span></div>' +
       '<div class="fm-k">정산 대상 기간</div><div class="fm-big">' + L.fmtFull(p.start) + ' ~ ' + L.fmtFull(p.end) + '</div>' +
@@ -2755,7 +2816,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!cur) return h + '<div class="empty" style="min-height:170px"><div><b>등록된 안내문 양식이 없어요</b>자주 쓰는 안내문을 등록해 두면 날짜만 자동으로 채워서 바로 복사할 수 있어요</div></div>';
     const { f, blockers } = noticeBlockers(cur.body, c);
     const prev = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
-    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark><mark class="tk tk-w">업무명</mark><mark class="tk tk-h">마감 시간</mark></span><span class="sp"></span>' +
+    h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark><mark class="tk tk-w">업무명</mark><mark class="tk tk-h">마감 시간</mark><mark class="tk tk-a">정산 금액</mark></span><span class="sp"></span>' +
       '<button class="btn primary" data-act="noticeCopy" data-id="' + cur.id + '"' + (blockers.length ? ' disabled' : '') + '>안내문 복사</button>' +
       '<button class="btn" data-act="noticeEdit" data-id="' + cur.id + '">수정</button><button class="btn danger" data-act="noticeDel" data-id="' + cur.id + '">삭제</button></div>' +
       '<div id="noticeBlk">' + (blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '') + '</div>' +
@@ -2817,11 +2878,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     }
     const tog = t.closest && t.closest('[data-combotog]');
     if (tog) { e.preventDefault(); comboShow(ui.combo === tog.dataset.combotog ? null : tog.dataset.combotog); return; }
+    if (t.closest && t.closest('.combo-empty')) { e.preventDefault(); comboShow(null); return; }
     const box = t.closest && t.closest('.combo');
     if (box) { comboShow(box.dataset.combo); return; }
     if (ui.combo) comboShow(null);
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.combo) comboShow(null); if (e.key === 'Enter' && ui.combo && e.target.closest && e.target.closest('.combo')) { comboShow(null); e.target.blur(); } });
+  // 직접 입력을 시작하면 목록을 닫아 아래 칸을 가리지 않게 함
+  document.addEventListener('input', e => { if (ui.combo && e.target.closest && e.target.closest('.combo')) comboShow(null); });
+  document.addEventListener('keydown', e => { if (e.key === 'Tab' && ui.combo) comboShow(null); if (e.key === 'Escape' && ui.combo) comboShow(null); if (e.key === 'Enter' && ui.combo && e.target.closest && e.target.closest('.combo')) { comboShow(null); e.target.blur(); } });
 
   /* 안내문 양식 등록/수정 */
   function openNotice(id) {
@@ -2835,6 +2899,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="tkrow"><span class="tkl c">회사</span>' + chips([L.COMPANY_TOKEN], 'c') + '</div>' +
       '<div class="tkrow"><span class="tkl w">업무</span>' + chips([L.TASK_TOKEN], 'w') + '</div>' +
       '<div class="tkrow"><span class="tkl h">시간</span>' + chips([L.TIME_TOKEN], 'h') + '</div>' +
+      '<div class="tkrow"><span class="tkl a">금액</span>' + chips(L.AMOUNT_TOKENS, 'a') + '</div>' +
       dlNames.map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
       '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
