@@ -1053,7 +1053,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .fm-phead .sp{flex:1}
 .fm-leg{display:inline-flex;gap:6px}
 .fm-block{background:var(--pink-soft);border:1px solid #f7c3dc;color:var(--pink-ink);border-radius:12px;padding:9px 12px;font-size:12px;font-weight:600;line-height:1.7;margin-bottom:8px}
-.fm-preview{white-space:pre-wrap;word-break:break-word;border:1px solid var(--line);border-radius:14px;background:#fff;padding:16px 18px;line-height:1.85;font-size:14px;min-height:140px}
+.fm-preview{white-space:normal;word-break:break-word;border:1px solid var(--line);border-radius:14px;background:#fff;padding:16px 18px;line-height:1.85;font-size:14px;min-height:140px}
 .tk{border-radius:5px;padding:1px 4px;font-weight:600;font-style:normal}
 mark.tk-s{background:#dfe8ff;color:#2f469d}
 mark.tk-d{background:#ffe9c9;color:#8a4f0a}
@@ -1061,6 +1061,15 @@ mark.tk-x{background:var(--pink-soft);color:var(--pink-ink);outline:1px dashed v
 mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .fm-body{width:100%;min-height:230px;resize:vertical;padding:12px 14px;line-height:1.8;font-size:14px;white-space:pre-wrap}
+/* 서식 있는 안내문 편집기 */
+.fm-rich{min-height:230px;max-height:52vh;overflow:auto;resize:vertical;padding:12px 14px;line-height:1.8;font-size:14px;white-space:normal;word-break:break-word;border:1px solid var(--line);border-radius:12px;background:#fff;outline:none}
+.fm-rich:focus{border-color:var(--accent)}
+.fm-rich:empty::before{content:attr(data-ph);color:var(--faint);white-space:pre-line}
+.fm-rich table,.fm-preview table{border-collapse:collapse}
+.fm-rich td,.fm-rich th,.fm-preview td,.fm-preview th{border:1px solid #ccc;padding:2px 6px}
+.fm-rich p,.fm-preview p{margin:0}
+.rtbar{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:-2px}
+.rtbar button{padding:4px 10px;font-size:12px;border-radius:8px}
 .tkbar{display:grid;gap:6px}
 .tkrow{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .tkl{font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;color:#fff;margin-right:2px}
@@ -2072,24 +2081,29 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       confirmBox('"' + n.name + '" 안내문 양식을 삭제할까요?', '삭제', () => { S.notices = S.notices.filter(x => x.id !== n.id); commit(); }, () => {});
     },
     noticeSave(el) {
-      const name = $('#nName').value.trim(), body = $('#nBody').value, id = Number(el.dataset.id);
+      const ed = $('#nBody'), html = sanitizeHtml(ed.innerHTML), body = htmlToText(html), id = Number(el.dataset.id);
+      const name = $('#nName').value.trim();
       if (!name) { $('#nErr').style.color = 'var(--pink-ink)'; $('#nErr').textContent = '양식 이름을 입력해 주세요.'; return; }
       if (!body.trim()) { $('#nErr').style.color = 'var(--pink-ink)'; $('#nErr').textContent = '안내문 내용을 입력해 주세요.'; return; }
       const now = iso(today());
-      if (id) { const n = S.notices.find(x => x.id === id); if (n) { n.name = name; n.body = body; n.updated = now; } }
-      else { const nid = S.next_id++; S.notices.push({ id: nid, name, body, created: now, updated: now }); ui.noticeId = nid; }
+      if (id) { const n = S.notices.find(x => x.id === id); if (n) { n.name = name; n.body = body; n.html = html; n.updated = now; } }
+      else { const nid = S.next_id++; S.notices.push({ id: nid, name, body, html, created: now, updated: now }); ui.noticeId = nid; }
       closeModal(); commit();
     },
     tokIns(el) {
-      const ta = $('#nBody'); if (!ta) return;
-      const txt = '{' + el.dataset.t + '}';
-      ta.setRangeText(txt, ta.selectionStart, ta.selectionEnd, 'end'); ta.focus(); ta.dispatchEvent(new Event('input'));
+      const ed = $('#nBody'); if (!ed) return;
+      rtRestore(ed);
+      document.execCommand('insertText', false, '{' + el.dataset.t + '}');
+      rtSave(ed); ed.dispatchEvent(new Event('input'));
     },
     noticeCopy(el) {
       const n = S.notices.find(x => String(x.id) === el.dataset.id); if (!n) return;
-      const c = calcSettle(), { f, blockers } = noticeBlockers(n.body, c);
+      const c = calcSettle(), html = noticeHtml(n), { f, blockers } = noticeBlockers(n.body, c, html);
       if (blockers.length) return;
-      copyText(f.text, el, '안내문 복사');
+      // 서식째 복사 (메일·한글 등에 붙여 넣으면 굵게·형광펜이 유지돼요). 안 되면 글자만 복사
+      const out = '<div style="font-family:\'Malgun Gothic\',\'맑은 고딕\',sans-serif;font-size:10pt;color:#000;line-height:1.6">' + fillHtml(html, c.vars, false).html + '</div>';
+      if (copyRich(out)) { el.textContent = '복사됨 ✓'; setTimeout(() => { if (el.isConnected) el.textContent = '안내문 복사'; }, 1500); }
+      else copyText(f.text, el, '안내문 복사');
       if (c.company) rememberCompany(c.company);
       if (c.task) rememberTaskName(c.task);
       if (c.time) rememberDueTime(c.time);
@@ -2119,7 +2133,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       else out.n = parseInt(r.n, 10);
       if (id) {
         const d = S.settle.deadlines.find(x => x.id === id);
-        if (d) { if (d.name !== name) S.notices.forEach(nn => { nn.body = L.renameDeadlineTokens(nn.body, d.name, name); }); d.name = name; d.rule = out; }
+        if (d) { if (d.name !== name) S.notices.forEach(nn => { nn.body = L.renameDeadlineTokens(nn.body, d.name, name); if (nn.html != null) nn.html = L.renameDeadlineTokens(nn.html, d.name, name); }); d.name = name; d.rule = out; }
       } else S.settle.deadlines.push({ id: S.next_id++, name, rule: out });
       closeModal(); commit();
     },
@@ -2474,9 +2488,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     // 다시 그려도 입력 중이던 칸(id 가 있는 칸)의 커서를 유지
     const ae = document.activeElement, fid = ae && ae.id && p.contains(ae) && /^(INPUT|TEXTAREA)$/.test(ae.tagName) ? ae.id : '';
     let sel = null; try { if (fid) sel = [ae.selectionStart, ae.selectionEnd]; } catch (e) { /* ignore */ }
+    const typed = fid ? ae.value : null;   // 입력 중인 글자는 그대로 (쉼표 정리 등은 칸을 떠날 때)
     p.innerHTML = ({ sum: viewSum, all: viewAll, cal: viewCal, log: viewLog, form: viewForm, stat: viewStats })[ui.tab]();
     p.scrollTop = sc;
-    if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { if (sel) el.setSelectionRange(Math.min(sel[0], el.value.length), Math.min(sel[1], el.value.length)); } catch (e) { /* ignore */ } } }
+    if (fid) { const el = document.getElementById(fid); if (el) { if (typed != null && 'value' in el) el.value = typed; el.focus(); try { if (sel) el.setSelectionRange(Math.min(sel[0], el.value.length), Math.min(sel[1], el.value.length)); } catch (e) { /* ignore */ } } }
   }
 
   /* 요약: 지연 · 진행 · 마감까지 7일 미만 (한 업무는 한 곳에만) */
@@ -2701,6 +2716,75 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return ok;
   }
 
+  /* ── 서식 있는 안내문 (HTML) ──
+     붙여 넣은 서식(굵게·형광펜·글자색·표 등)은 남기고, 스크립트·이미지·이상한 속성은 지워서 저장해요 */
+  const RT_KEEP = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'SPAN', 'FONT', 'MARK', 'BR', 'P', 'DIV', 'UL', 'OL', 'LI',
+    'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'SUB', 'SUP', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
+  const RT_DROP = new Set(['SCRIPT', 'STYLE', 'META', 'LINK', 'TITLE', 'HEAD', 'IMG', 'SVG', 'OBJECT', 'EMBED', 'IFRAME', 'VIDEO', 'AUDIO', 'CANVAS', 'INPUT', 'BUTTON', 'SELECT', 'TEXTAREA', 'FORM', 'NOSCRIPT', 'TEMPLATE']);
+  const RT_CSS = /^(color|background-color|font-weight|font-style|font-size|font-family|text-decoration|text-decoration-line|text-decoration-color|text-decoration-style|text-align|vertical-align|line-height|white-space|width|border|border-(top|right|bottom|left|collapse)(-(width|style|color))?|padding|padding-(top|right|bottom|left))$/;
+  function rtClean(node) {
+    for (const ch of [...node.childNodes]) {
+      if (ch.nodeType === 3) continue;
+      if (ch.nodeType !== 1) { ch.remove(); continue; }   // 주석 등
+      const tag = ch.tagName.toUpperCase();
+      if (RT_DROP.has(tag)) { ch.remove(); continue; }
+      rtClean(ch);
+      if (!RT_KEEP.has(tag)) { ch.replaceWith(...ch.childNodes); continue; }   // 모르는 태그는 글자만 남김
+      const keep = {};
+      if (ch.style) for (let i = 0; i < ch.style.length; i++) {
+        const prop = ch.style[i], val = ch.style.getPropertyValue(prop);
+        if (RT_CSS.test(prop) && !/url\(|expression/i.test(val)) keep[prop] = val;
+      }
+      const attrs = {};
+      if (tag === 'FONT') ['color', 'face', 'size'].forEach(a => { if (ch.hasAttribute(a)) attrs[a] = ch.getAttribute(a); });
+      if (tag === 'TD' || tag === 'TH') ['colspan', 'rowspan'].forEach(a => { if (ch.hasAttribute(a)) attrs[a] = ch.getAttribute(a); });
+      if (tag === 'TABLE' && ch.hasAttribute('border')) attrs.border = ch.getAttribute('border');
+      for (const a of [...ch.attributes]) ch.removeAttribute(a.name);
+      Object.entries(attrs).forEach(([k, v]) => ch.setAttribute(k, v));
+      const css = Object.entries(keep).map(([k, v]) => k + ':' + v).join(';');
+      if (css) ch.setAttribute('style', css);
+    }
+  }
+  function sanitizeHtml(html) {
+    const t = document.createElement('template');
+    t.innerHTML = String(html || '').replace(/<!--[\s\S]*?-->/g, '');
+    rtClean(t.content);
+    return t.innerHTML.trim();
+  }
+  /* 예전에 글자만 저장한 안내문 → HTML (줄바꿈·띄어쓰기 유지) */
+  const textToHtml = t => esc(String(t || '')).replace(/ {2}/g, ' &nbsp;').replace(/\r?\n/g, '<br>');
+  const noticeHtml = n => (n && n.html != null ? n.html : textToHtml(n ? n.body : ''));
+  /* 화면에 잠깐 붙여서 줄바꿈이 살아 있는 글자만 뽑기 */
+  function htmlToText(html) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;white-space:normal';
+    d.innerHTML = html; document.body.appendChild(d);
+    const t = d.innerText; d.remove();
+    return t.replace(/\u00a0/g, ' ');
+  }
+  /* 서식은 그대로 두고 글자 안의 {항목}만 바꿔요. marks=true 면 미리보기용 색 표시 */
+  function fillHtml(html, vars, marks) {
+    const t = document.createElement('template'); t.innerHTML = html;
+    let toks = 0;
+    const walk = node => {
+      for (const ch of [...node.childNodes]) {
+        if (ch.nodeType === 1) { walk(ch); continue; }
+        if (ch.nodeType !== 3 || ch.nodeValue.indexOf('{') < 0) continue;
+        const f = L.fillNotice(ch.nodeValue, vars), frag = document.createDocumentFragment();
+        for (const sg of f.segs) {
+          if (sg.t === 'text') { frag.appendChild(document.createTextNode(sg.v)); continue; }
+          toks++;
+          if (marks) { const m = document.createElement('mark'); m.className = 'tk tk-' + sg.k; m.title = '{' + sg.name + '}'; m.textContent = sg.v; frag.appendChild(m); }
+          else frag.appendChild(document.createTextNode(sg.v));
+        }
+        ch.replaceWith(frag);
+      }
+    };
+    walk(t.content);
+    return { html: t.innerHTML, toks };
+  }
+  const tokCount = f => f.segs.filter(x => x.t === 'tok').length;
+
   /* 정산 대상 월 · 마감 기한 계산 (마감 기한마다 규칙이 따로 있고, 규칙이 없으면 날짜를 정하지 않음) */
   /* 정산 금액: 건수·공급가는 입력, 세액은 공급가의 10%(원 단위 미만 버림, 직접 고칠 수 있음), 총액 = 공급가 + 세액 */
   const amtKey = (y, m) => y + '-' + pad2(m);
@@ -2743,8 +2827,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return { y, m, period, deadlines, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amt: amountsOf(y, m),
       vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amounts: amountsOf(y, m).text } };
   }
-  function noticeBlockers(body, c) {
+  function noticeBlockers(body, c, html) {
     const f = L.fillNotice(body, c.vars), b = [];
+    if (html != null && fillHtml(html, c.vars, false).toks !== tokCount(f)) b.push('서식이 {항목} 글자 중간에 걸려 있어요. 안내문 양식을 수정해서 해당 항목을 지우고 항목 버튼으로 다시 넣어 주세요.');
     if (!c.period.ok) b.push('정산 대상 기간 검증에 실패했어요.');
     if (c.deadlines.some(d => d.date && !d.ok)) b.push('마감 기한의 날짜·요일 검증에 실패했어요.');
     if (f.missing.length) b.push('마감 기한 항목(' + f.missing.join(', ') + ')의 날짜가 아직 없어요. 마감 기한을 추가하고 규칙을 설정해 주세요.');
@@ -2836,8 +2921,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       list.map(n => '<button class="chip ' + (n.id === ui.noticeId ? 'on' : '') + '" data-act="noticePick" data-id="' + n.id + '">' + esc(n.name) + '</button>').join('') +
       '<button class="chip" data-act="noticeAdd">＋ 안내문 양식 등록</button></div>';
     if (!cur) return h + '<div class="empty" style="min-height:170px"><div><b>등록된 안내문 양식이 없어요</b>자주 쓰는 안내문을 등록해 두면 날짜만 자동으로 채워서 바로 복사할 수 있어요</div></div>';
-    const { f, blockers } = noticeBlockers(cur.body, c);
-    const prev = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
+    const { blockers } = noticeBlockers(cur.body, c, noticeHtml(cur));
+    const prev = fillHtml(noticeHtml(cur), c.vars, true).html;
     h += '<div class="fm-phead"><b>미리보기</b><span class="fm-leg"><mark class="tk tk-s">정산 대상 날짜</mark><mark class="tk tk-d">마감 기한 날짜</mark><mark class="tk tk-c">회사명</mark><mark class="tk tk-w">업무명</mark><mark class="tk tk-h">마감 시간</mark><mark class="tk tk-a">정산 금액</mark></span><span class="sp"></span>' +
       '<button class="btn primary" data-act="noticeCopy" data-id="' + cur.id + '"' + (blockers.length ? ' disabled' : '') + '>안내문 복사</button>' +
       '<button class="btn" data-act="noticeEdit" data-id="' + cur.id + '">수정</button><button class="btn danger" data-act="noticeDel" data-id="' + cur.id + '">삭제</button></div>' +
@@ -2861,8 +2946,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
   function refreshNoticePreview() {
     const n = (S.notices || []).find(x => x.id === ui.noticeId), prev = $('#noticePrev'); if (!n || !prev) return;
-    const c = calcSettle(), { f, blockers } = noticeBlockers(n.body, c);
-    prev.innerHTML = f.segs.map(sg => sg.t === 'text' ? esc(sg.v) : '<mark class="tk tk-' + sg.k + '" title="' + esc('{' + sg.name + '}') + '">' + esc(sg.v) + '</mark>').join('');
+    const c = calcSettle(), { blockers } = noticeBlockers(n.body, c, noticeHtml(n));
+    prev.innerHTML = fillHtml(noticeHtml(n), c.vars, true).html;
     const blk = $('#noticeBlk'); if (blk) blk.innerHTML = blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '';
     const btn = document.querySelector('[data-act="noticeCopy"]'); if (btn) btn.disabled = blockers.length > 0;
   }
@@ -2909,15 +2994,30 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   document.addEventListener('input', e => { if (ui.combo && e.target.closest && e.target.closest('.combo')) comboShow(null); });
   document.addEventListener('keydown', e => { if (e.key === 'Tab' && ui.combo) comboShow(null); if (e.key === 'Escape' && ui.combo) comboShow(null); if (e.key === 'Enter' && ui.combo && e.target.closest && e.target.closest('.combo')) { comboShow(null); e.target.blur(); } });
 
+  /* 편집기의 커서 위치 기억 (항목·서식 버튼을 눌러도 그 자리에 들어가게) */
+  let rtRange = null;
+  function rtSave(ed) { const sel = window.getSelection(); if (sel.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer)) rtRange = sel.getRangeAt(0).cloneRange(); }
+  function rtRestore(ed) {
+    ed.focus();
+    const sel = window.getSelection();
+    if (rtRange && ed.contains(rtRange.commonAncestorContainer)) { sel.removeAllRanges(); sel.addRange(rtRange); }
+    else { const rg = document.createRange(); rg.selectNodeContents(ed); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg); }
+  }
+
   /* 안내문 양식 등록/수정 */
   function openNotice(id) {
+    rtRange = null;
     const n = id ? S.notices.find(x => x.id === id) : null;
     const chips = (names, g) => names.map(nm => '<button type="button" class="chip tkb tkb-' + g + '" data-act="tokIns" data-t="' + esc(nm) + '">{' + esc(nm) + '}</button>').join('');
     const dlNames = (S.settle.deadlines || []).map(d => d.name); if (!dlNames.length) dlNames.push(L.DEFAULT_DL);
     const M = openModal(() => '<h3>' + (n ? '안내문 양식 수정' : '안내문 양식 등록') + '</h3><div class="form">' +
       '<label>양식 이름</label><input id="nName" value="' + esc(n ? n.name : '') + '" placeholder="예: 월 정산 자료 제출 안내">' +
-      '<label>안내문 내용 (줄바꿈·띄어쓰기가 그대로 저장돼요)</label><textarea id="nBody" class="fm-body" spellcheck="false" placeholder="예)&#10;안녕하세요.&#10;&#10;정산 대상 기간: {정산대상기간}&#10;제출 기한: {마감기한}&#10;&#10;감사합니다.">' + esc(n ? n.body : '') + '</textarea>' +
-      '<label>날짜 항목 넣기 (누르면 커서 위치에 들어가요)</label><div class="tkbar"><div class="tkrow"><span class="tkl s">정산 대상</span>' + chips(L.TOKEN_DEFS.map(d => d[0]), 's') + '</div>' +
+      '<label>안내문 내용 (메일 등에서 복사해 붙여 넣으면 굵게·형광펜 같은 서식도 그대로 남아요)</label>' +
+      '<div class="rtbar"><button type="button" class="btn" data-rt="bold" title="굵게 (Ctrl+B)"><b>굵게</b></button><button type="button" class="btn" data-rt="underline" title="밑줄 (Ctrl+U)"><u>밑줄</u></button>' +
+      '<button type="button" class="btn" data-rt="hilite" title="형광펜"><span style="background:#fff35c">형광펜</span></button><button type="button" class="btn" data-rt="red" title="빨간 글씨"><span style="color:#d4000b">빨간 글씨</span></button>' +
+      '<button type="button" class="btn" data-rt="clear" title="고른 부분의 서식을 지워요">서식 지우기</button></div>' +
+      '<div id="nBody" class="fm-rich" contenteditable="true" spellcheck="false" data-ph="예)&#10;안녕하세요.&#10;&#10;정산 대상 기간: {정산대상기간}&#10;제출 기한: {마감기한}&#10;&#10;감사합니다.">' + (n ? noticeHtml(n) : '') + '</div>' +
+      '<label>항목 넣기 (누르면 커서 위치에 들어가요)</label><div class="tkbar"><div class="tkrow"><span class="tkl s">정산 대상</span>' + chips(L.TOKEN_DEFS.map(d => d[0]), 's') + '</div>' +
       '<div class="tkrow"><span class="tkl c">회사</span>' + chips([L.COMPANY_TOKEN], 'c') + '</div>' +
       '<div class="tkrow"><span class="tkl w">업무</span>' + chips([L.TASK_TOKEN], 'w') + '</div>' +
       '<div class="tkrow"><span class="tkl h">시간</span>' + chips([L.TIME_TOKEN], 'h') + '</div>' +
@@ -2927,12 +3027,34 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
     M.el.style.width = 'min(720px,100%)';
     const check = () => {
-      const f = L.fillNotice(M.el.querySelector('#nBody').value, calcSettle().vars), msg = [];
+      const ed = M.el.querySelector('#nBody');
+      const f = L.fillNotice(ed.innerText, calcSettle().vars), msg = [];
+      if (fillHtml(ed.innerHTML, calcSettle().vars, false).toks !== tokCount(f)) msg.push('서식이 {항목} 글자 중간에 걸려 있어요. 그 항목을 지우고 항목 버튼으로 다시 넣어 주세요');
       if (f.unknown.length) msg.push('알 수 없는 항목: ' + f.unknown.join(', ') + ' (아래 항목 버튼에서 골라 넣어 주세요)');
       if (f.undefinedDeadlines.length) msg.push('아직 만들지 않은 마감 기한: ' + f.undefinedDeadlines.join(', ') + ' (저장한 뒤 "마감 기한 추가"로 만들어 주세요)');
       const e = M.el.querySelector('#nErr'); e.style.color = msg.length ? 'var(--pink-ink)' : ''; e.textContent = msg.join(' / ');
     };
-    M.el.querySelector('#nBody').addEventListener('input', check); check();
+    const ed = M.el.querySelector('#nBody');
+    ed.addEventListener('input', check); check();
+    // 붙여넣기: 서식(HTML)은 정리해서 넣고, 글자만 있으면 글자로
+    ed.addEventListener('paste', e => {
+      const cd = e.clipboardData; if (!cd) return;
+      const h = cd.getData('text/html'), tx = cd.getData('text/plain');
+      e.preventDefault();
+      if (h) document.execCommand('insertHTML', false, sanitizeHtml(h.replace(/^[\s\S]*<!--StartFragment-->/, '').replace(/<!--EndFragment-->[\s\S]*$/, '')));
+      else document.execCommand('insertText', false, tx || '');
+    });
+    ['keyup', 'mouseup', 'input', 'focus'].forEach(ev => ed.addEventListener(ev, () => rtSave(ed)));
+    M.el.querySelectorAll('[data-rt]').forEach(b => b.addEventListener('mousedown', e => {
+      e.preventDefault(); rtRestore(ed);
+      try { document.execCommand('styleWithCSS', false, true); } catch (x) { /* ignore */ }
+      const k = b.dataset.rt;
+      if (k === 'bold' || k === 'underline') document.execCommand(k);
+      else if (k === 'hilite') { if (!document.execCommand('hiliteColor', false, '#fff35c')) document.execCommand('backColor', false, '#fff35c'); }
+      else if (k === 'red') document.execCommand('foreColor', false, '#d4000b');
+      else if (k === 'clear') { document.execCommand('removeFormat'); document.execCommand('hiliteColor', false, 'transparent'); }
+      rtSave(ed); check();
+    }));
     setTimeout(() => { const i = M.el.querySelector('#nName'); if (i) i.focus(); }, 0);
   }
 
