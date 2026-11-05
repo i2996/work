@@ -860,8 +860,13 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mini-app{height:100%;display:flex;flex-direction:column;gap:8px;padding:10px;overflow:hidden}
 .mini-top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
 .brand.sm{font-size:16px}
-.pinbtn{padding:5px 11px;font-size:12px;font-weight:600;color:var(--muted);border-radius:999px;background:#fff}
+.pinbtn{width:32px;height:32px;padding:0;display:inline-grid;place-items:center;color:var(--faint);border-radius:999px;background:#fff}
+.pinbtn svg{width:16px;height:16px;transform:rotate(45deg);transition:transform .15s}
+.pinbtn .pf{fill:none}
+.pinbtn:hover{color:var(--muted)}
 .pinbtn.on{background:var(--accent-soft);color:var(--accent-ink);border-color:#cfd9f6}
+.pinbtn.on svg{transform:rotate(0deg)}
+.pinbtn.on .pf{fill:currentColor}
 .mini-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:10px 12px 8px;min-height:0}
 .mini-card .mt{font-size:13px;font-weight:700;margin-bottom:6px}
 .mini-sum{flex:none}
@@ -2027,7 +2032,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* ── 동작 ── */
   const acts = {
     toggleMini() { if (hasPy()) window.pywebview.api.toggle_mini(); },
-    pin(el) { pinned = !pinned; el.classList.toggle('on', pinned); if (hasPy()) window.pywebview.api.set_topmost(pinned); },
+    pin(el) { pinned = !pinned; el.classList.toggle('on', pinned); el.title = '항상 위: ' + (pinned ? '켜짐 (누르면 꺼요)' : '꺼짐 (누르면 켜요)'); if (hasPy()) window.pywebview.api.set_topmost(pinned); },
     openSettings() { openSettings(); },
     async cfgSave() { const r = await cfgSave(false); const e = r && r.autostart_error; cfgMsg(e ? esc(e) : '저장했어요.', !!e); },
     async cfgClear() { await cfgSave(true); closeModal(); openSettings(); },
@@ -3258,7 +3263,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       $('#todayText').textContent = n.getFullYear() + '년 ' + (n.getMonth() + 1) + '월 ' + n.getDate() + '일 ' + WD[n.getDay()] + '요일';
     } else {
       root.innerHTML = '<div class="mini-app"><div class="mini-top"><div class="brand sm">▣ WORK SPACE<span>MINI</span></div>' +
-        '<button class="pinbtn on" data-act="pin">항상 위</button></div>' +
+        '<button class="pinbtn on" data-act="pin" title="항상 위: 켜짐 (누르면 꺼요)" aria-label="항상 위"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="pf" d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 14v7"/></svg></button></div>' +
         '<section class="mini-card mini-sum"><div class="mt">현황</div><div id="miniSummary"></div></section>' +
         '<section class="mini-card mini-tasks"><div class="mt">업무</div>' +
         '<div class="mt-add"><input id="miniTaskIn" placeholder="새 업무 입력 후 Enter"><button class="btn primary" data-act="miniTaskAdd">＋ 추가</button></div>' +
