@@ -1087,6 +1087,19 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 
 /* 회사명 */
 .fm-co{min-width:260px;flex:1;max-width:380px;padding:8px 11px;font-size:14px;font-weight:600}
+/* 회사명·업무명 드롭다운: 입력한 내용과 상관없이 저장된 목록을 모두 보여주고, 누르면 바로 적용 */
+.combo{position:relative;display:flex;flex:1;min-width:260px;max-width:380px}
+.combo .fm-co{max-width:none;min-width:0;width:100%;padding-right:38px}
+.combo-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:30px;height:30px;padding:0;border:0;background:transparent;color:var(--muted);border-radius:8px;font-size:12px}
+.combo-btn:hover{background:#f1f0f8;color:var(--text)}
+.combo-list{display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(50,45,90,.16);max-height:260px;overflow:auto;padding:4px}
+.combo-list.open{display:block}
+.combo-item{display:flex;align-items:center;gap:6px;padding:2px 2px 2px 10px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600}
+.combo-item span{flex:1;padding:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.combo-item:hover{background:#f4f3fa}
+.combo-item.on{background:var(--accent-soft);color:var(--accent-ink)}
+.combo-item .xb{width:26px;height:26px;font-size:13px}
+.combo-empty{padding:10px;font-size:12px;color:var(--faint)}
 mark.tk-c{background:#d9f2e6;color:#1d6a49}
 .chip.tkb-c{border-color:#c5e3d3;background:#eefaf3;color:var(--mint-ink)}
 .tkl.c{background:#2a8a63}
@@ -1643,7 +1656,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'sum', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, combo: null, editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -2036,14 +2049,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     coChange(el) { S.settle.company = el.value.trim(); rememberCompany(el.value); commit(); },
     coInput(el) { S.settle.company = el.value; persist(); refreshNoticePreview(); },
-    coManage() { openCompanies(); },
-    coUse(el) { const n = S.companies[Number(el.dataset.i)]; if (n == null) return; S.settle.company = n; rememberCompany(n); closeModal(); commit(); },
-    coDel(el) { S.companies.splice(Number(el.dataset.i), 1); commit(); },
     twChange(el) { S.settle.taskName = el.value.trim(); rememberTaskName(el.value); commit(); },
     twInput(el) { S.settle.taskName = el.value; persist(); refreshNoticePreview(); },
-    twManage() { openTaskNames(); },
-    twUse(el) { const n = S.taskNames[Number(el.dataset.i)]; if (n == null) return; S.settle.taskName = n; rememberTaskName(n); closeModal(); commit(); },
-    twDel(el) { S.taskNames.splice(Number(el.dataset.i), 1); commit(); },
     dlAdd() { openDeadline(0); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
     dlSave(el) {
@@ -2695,12 +2702,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (let m = 1; m <= 12; m++) mo += '<option value="' + m + '"' + (m === c.m ? ' selected' : '') + '>' + m + '월</option>';
     let h = '<div class="fm-sel"><span class="fm-lab">정산 대상</span><button class="btn" data-act="stPrev">‹</button><select data-chg="stY">' + yo + '</select><select data-chg="stM">' + mo + '</select>' +
       '<button class="btn" data-act="stNext">›</button><span class="fm-hint">정산 대상 연도·월을 고르면 기간이 자동으로 계산돼요</span></div>' +
-      '<div class="fm-sel"><span class="fm-lab">회사명</span><input id="stCompany" class="fm-co" list="companyList" value="' + esc(c.company) + '" placeholder="안내문의 {회사명} 자리에 들어가요" data-chg="coChange" data-inp="coInput" autocomplete="off">' +
-      '<datalist id="companyList">' + (S.companies || []).map(n => '<option value="' + esc(n) + '"></option>').join('') + '</datalist>' +
-      ((S.companies || []).length ? '<button class="btn" data-act="coManage">저장된 회사 목록</button>' : '') + '<span class="fm-hint">한 번 입력하면 기억해요 · 다른 회사는 새로 입력하거나 목록에서 골라요</span></div>' +
-      '<div class="fm-sel"><span class="fm-lab">업무명</span><input id="stTaskName" class="fm-co" list="taskNameList" value="' + esc(c.task) + '" placeholder="안내문의 {업무명} 자리에 들어가요" data-chg="twChange" data-inp="twInput" autocomplete="off">' +
-      '<datalist id="taskNameList">' + (S.taskNames || []).map(n => '<option value="' + esc(n) + '"></option>').join('') + '</datalist>' +
-      ((S.taskNames || []).length ? '<button class="btn" data-act="twManage">저장된 업무 목록</button>' : '') + '<span class="fm-hint">한 번 입력하면 기억해요 · 다른 업무는 새로 입력하거나 목록에서 골라요</span></div>';
+      '<div class="fm-sel"><span class="fm-lab">회사명</span>' + combo('co', 'stCompany', c.company, S.companies, '안내문의 {회사명} 자리에 들어가요', 'coChange', 'coInput') +
+      '<span class="fm-hint">한 번 입력하면 기억해요 · 칸을 누르면 저장된 회사가 모두 보이고, 고르면 바로 바뀌어요</span></div>' +
+      '<div class="fm-sel"><span class="fm-lab">업무명</span>' + combo('tw', 'stTaskName', c.task, S.taskNames, '안내문의 {업무명} 자리에 들어가요', 'twChange', 'twInput') +
+      '<span class="fm-hint">한 번 입력하면 기억해요 · 칸을 누르면 저장된 업무가 모두 보이고, 고르면 바로 바뀌어요</span></div>';
     /* 정산 대상 기간 */
     h += '<div class="fm-calc"><div class="fm-box s"><div class="fm-bt"><span class="fm-badge s">정산 대상</span><span class="fm-bm">' + c.y + '년 ' + c.m + '월분</span></div>' +
       '<div class="fm-k">정산 대상 기간</div><div class="fm-big">' + L.fmtFull(p.start) + ' ~ ' + L.fmtFull(p.end) + '</div>' +
@@ -2748,11 +2753,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     name = (name || '').trim(); if (!name) return;
     S.taskNames = [name].concat((S.taskNames || []).filter(x => x !== name)).slice(0, 20);
   }
-  function openTaskNames() {
-    openModal(() => '<h3>저장된 업무 목록</h3><p class="hint2">업무명 칸에 입력했던 이름이에요. 필요 없는 건 지울 수 있어요.</p><div class="mlist">' +
-      ((S.taskNames || []).length ? S.taskNames.map((n, i) => '<div class="mitem"><div class="mt"><b>' + esc(n) + '</b></div><button class="btn" data-act="twUse" data-i="' + i + '">사용</button><button class="xb" data-act="twDel" data-i="' + i + '" title="삭제">✕</button></div>').join('') : '<div class="tempty">저장된 업무가 없어요</div>') +
-      '</div><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>', true);
-  }
   function refreshNoticePreview() {
     const n = (S.notices || []).find(x => x.id === ui.noticeId), prev = $('#noticePrev'); if (!n || !prev) return;
     const c = calcSettle(), { f, blockers } = noticeBlockers(n.body, c);
@@ -2760,11 +2760,44 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const blk = $('#noticeBlk'); if (blk) blk.innerHTML = blockers.length ? '<div class="fm-block">' + blockers.map(x => '<div>⚠ ' + esc(x) + '</div>').join('') + '</div>' : '';
     const btn = document.querySelector('[data-act="noticeCopy"]'); if (btn) btn.disabled = blockers.length > 0;
   }
-  function openCompanies() {
-    openModal(() => '<h3>저장된 회사 목록</h3><p class="hint2">회사명 칸에 입력했던 이름이에요. 필요 없는 건 지울 수 있어요.</p><div class="mlist">' +
-      ((S.companies || []).length ? S.companies.map((n, i) => '<div class="mitem"><div class="mt"><b>' + esc(n) + '</b></div><button class="btn" data-act="coUse" data-i="' + i + '">사용</button><button class="xb" data-act="coDel" data-i="' + i + '" title="삭제">✕</button></div>').join('') : '<div class="tempty">저장된 회사가 없어요</div>') +
-      '</div><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>', true);
+  /* 회사명·업무명 드롭다운 (k: 'co' 회사 / 'tw' 업무) */
+  const COMBO = {
+    co: { list: () => S.companies, set: n => { S.settle.company = n; rememberCompany(n); }, empty: '저장된 회사가 없어요 · 입력하면 여기에 쌓여요' },
+    tw: { list: () => S.taskNames, set: n => { S.settle.taskName = n; rememberTaskName(n); }, empty: '저장된 업무가 없어요 · 입력하면 여기에 쌓여요' },
+  };
+  function combo(k, id, value, list, ph, chg, inp) {
+    list = list || [];
+    const items = list.length ? list.map((n, i) => '<div class="combo-item' + (n === value ? ' on' : '') + '" data-pick="' + k + '" data-i="' + i + '"><span>' + esc(n) + '</span>' +
+      '<button type="button" class="xb" data-pickdel="' + k + '" data-i="' + i + '" title="목록에서 지우기">✕</button></div>').join('') : '<div class="combo-empty">' + COMBO[k].empty + '</div>';
+    return '<div class="combo" data-combo="' + k + '"><input id="' + id + '" class="fm-co" value="' + esc(value) + '" placeholder="' + esc(ph) + '" data-chg="' + chg + '" data-inp="' + inp + '" autocomplete="off">' +
+      '<button type="button" class="combo-btn" data-combotog="' + k + '" title="저장된 목록 보기">▼</button>' +
+      '<div class="combo-list' + (ui.combo === k ? ' open' : '') + '">' + items + '</div></div>';
   }
+  function comboShow(k) {
+    ui.combo = k || null;
+    document.querySelectorAll('.combo').forEach(c => { const l = c.querySelector('.combo-list'); if (l) l.classList.toggle('open', c.dataset.combo === ui.combo); });
+  }
+  /* mousedown 에서 처리: 입력칸에서 포커스가 빠지며 화면이 다시 그려지기 전에 고른 값을 적용 */
+  document.addEventListener('mousedown', e => {
+    const t = e.target;
+    const del = t.closest && t.closest('[data-pickdel]');
+    if (del) { e.preventDefault(); const k = del.dataset.pickdel, l = COMBO[k].list(); l.splice(Number(del.dataset.i), 1); ui.combo = k; commit(); return; }
+    const pick = t.closest && t.closest('[data-pick]');
+    if (pick) {
+      e.preventDefault();
+      const k = pick.dataset.pick, n = COMBO[k].list()[Number(pick.dataset.i)]; if (n == null) return;
+      // 입력칸 값을 먼저 고른 값으로 바꾸고 포커스를 빼서, 늦게 오는 change 이벤트가 예전 입력값으로 덮어쓰지 않게 함
+      const inp = pick.closest('.combo').querySelector('input'); if (inp) inp.value = n;
+      const ae = document.activeElement; if (ae && ae.blur && ae.closest && ae.closest('.combo')) ae.blur();
+      COMBO[k].set(n); ui.combo = null; commit(); return;
+    }
+    const tog = t.closest && t.closest('[data-combotog]');
+    if (tog) { e.preventDefault(); comboShow(ui.combo === tog.dataset.combotog ? null : tog.dataset.combotog); return; }
+    const box = t.closest && t.closest('.combo');
+    if (box) { comboShow(box.dataset.combo); return; }
+    if (ui.combo) comboShow(null);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.combo) comboShow(null); if (e.key === 'Enter' && ui.combo && e.target.closest && e.target.closest('.combo')) { comboShow(null); e.target.blur(); } });
 
   /* 안내문 양식 등록/수정 */
   function openNotice(id) {
