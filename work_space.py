@@ -3,7 +3,7 @@
 WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불필요)
 
 - 메인창 : 업무 참고 메모 / 미니 달력 / 3일 TO-DO / 진행 / 전체 조회 / 업무 달력 / 통계
-- 미니창 : 오늘 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
+- 미니창 : 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
 - 데이터 : exe(또는 .py)와 같은 폴더의 workspace_data.json 에 자동 저장
 - 자동 실행 : 설정에서 Windows 시작 시 자동 실행 ON/OFF (현재 사용자 시작프로그램 등록)
 - 양식 : 엑셀 양식 등록·복사(openpyxl, 엑셀 실행 불필요), 안내문 양식 + 정산 대상 기간·마감 기한 자동 계산
@@ -865,12 +865,14 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mini-card{background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:10px 12px 8px;min-height:0}
 .mini-card .mt{font-size:13px;font-weight:700;margin-bottom:6px}
 .mini-sum{flex:none}
-.pills{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pills{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 .pill{border-radius:12px;padding:6px 6px;text-align:center;background:#f6f5fb}
 .pill b{display:block;font-size:18px;line-height:1.2}
 .pill span{font-size:11px;color:var(--muted)}
 .pill.p-pink{background:var(--pink-soft)}.pill.p-pink b{color:var(--pink-ink)}
 .pill.p-blue{background:var(--accent-soft)}.pill.p-blue b{color:var(--accent-ink)}
+.pill.p-soon{background:#fff7d4}.pill.p-soon b{color:#7d6410}
+.pill.p-late{background:#f9e9f0}.pill.p-late b{color:var(--pink-ink)}
 .mini-tasks{flex:1 1 0;min-height:92px;display:flex;flex-direction:column}
 .mini-tasks .body{flex:1;min-height:0;overflow-y:auto}
 .mt-add{flex:none;display:flex;gap:6px;margin-bottom:6px}
@@ -881,6 +883,8 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mt-row .t small{display:block;font-weight:500;color:var(--muted);font-size:11px}
 .mt-row.pink{background:var(--pink-soft);box-shadow:inset 3px 0 0 var(--pink)}
 .mt-row.pink .t{color:var(--pink-ink)}
+.mt-row.soon{background:#fff7d4;box-shadow:inset 3px 0 0 #f0d56e}
+.mt-row.soon .t{color:#7d6410}
 .mt-row .action{padding:5px 11px;flex:none}
 .mini-todo{flex:1.5 1 0;min-height:90px;padding:0;display:flex;overflow:hidden}
 .mini-todo .side-todo{padding:10px 6px 8px 12px;width:100%;min-height:0}
@@ -3091,17 +3095,21 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const t = today(), ts = iso(t);
     const doing = L.doingList(), late = L.lateList();
     const dueToday = L.occRange(t, t, { noTodos: true }).filter(o => iso(o.end) === ts && stOf(o.key) !== 'done');
+    // 마감 임박: 다른 화면에서 노랗게 칠해지는 업무 (마감까지 1~2일, 아직 완료 안 함) · 진행하지 않았어도 보여줌
+    const soon = L.occRange(addDays(t, 1), addDays(t, 2), { noTodos: true }).filter(soonOf);
     const map = new Map();
-    [...late, ...doing, ...dueToday].forEach(o => map.set(o.key, o));
-    const list = [...map.values()].sort((a, b) => (L.pinkOf(a) ? 0 : 1) - (L.pinkOf(b) ? 0 : 1) || L.byEnd(a, b));
-    $('#miniSummary').innerHTML = '<div class="pills"><div class="pill p-pink"><b>' + dueToday.length + '</b><span>오늘 마감</span></div>' +
-      '<div class="pill p-blue"><b>' + doing.length + '</b><span>진행</span></div><div class="pill"><b>' + late.length + '</b><span>지연</span></div></div>';
+    [...late, ...doing, ...dueToday, ...soon].forEach(o => map.set(o.key, o));
+    const rank = o => (L.pinkOf(o) ? 0 : soonOf(o) ? 1 : 2);
+    const list = [...map.values()].sort((a, b) => rank(a) - rank(b) || L.byEnd(a, b));
+    const pill = (cls, n, label) => '<div class="pill ' + cls + '"><b>' + n + '</b><span>' + label + '</span></div>';
+    $('#miniSummary').innerHTML = '<div class="pills">' + pill('p-pink', dueToday.length, '오늘 마감') + pill('p-soon', soon.length, '마감 임박') +
+      pill('p-late', late.length, '지연') + pill('p-blue', doing.length, '진행') + '</div>';
     let h = '';
     if (!list.length) h = '<div class="tempty">지금 처리할 업무가 없어요</div>';
     for (const o of list) {
       const n = diffDays(o.end, t), st = stOf(o.key), pk = L.pinkOf(o);
       const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
-      h += '<div class="mt-row ' + (pk ? 'pink' : '') + '"><div class="t">' + esc(o.title) + '<small>' + sub + '</small></div>' + ppBtn(o) +
+      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + '<small>' + sub + '</small></div>' + ppBtn(o) +
         (st === 'doing' ? '<button class="action finish" data-act="finish" data-key="' + o.key + '">완료</button>'
           : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>';
     }
@@ -3129,7 +3137,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     } else {
       root.innerHTML = '<div class="mini-app"><div class="mini-top"><div class="brand sm">▣ WORK SPACE<span>MINI</span></div>' +
         '<button class="pinbtn on" data-act="pin">항상 위</button></div>' +
-        '<section class="mini-card mini-sum"><div class="mt">오늘 현황</div><div id="miniSummary"></div></section>' +
+        '<section class="mini-card mini-sum"><div class="mt">현황</div><div id="miniSummary"></div></section>' +
         '<section class="mini-card mini-tasks"><div class="mt">업무</div>' +
         '<div class="mt-add"><input id="miniTaskIn" placeholder="새 업무 입력 후 Enter"><button class="btn primary" data-act="miniTaskAdd">＋ 추가</button></div>' +
         '<div class="body" id="miniTasks"></div></section>' +
