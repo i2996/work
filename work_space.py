@@ -2097,7 +2097,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
       (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>'
         : !isNew && kind === 'event' ? '<button class="btn danger" data-act="fDelEv" style="margin-right:auto">삭제</button>' : '') +
-      '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="fSave">저장</button></div>');
+      '<button class="btn primary" data-act="fSave">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
     const read = () => {
       if (g('fTitle')) t.title = g('fTitle').value.trim();
@@ -2245,7 +2245,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         : (om.trim() ? '<div class="memo-lab">' + ml + '만</div><div class="memo-view occ">' + esc(om) + '</div>' : '') +
           (String(t.memo || '').trim() ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<div class="memo-view">' + esc(t.memo) + '</div>' : '')) +
       '<div class="modal-actions">' + (editing
-        ? '<button class="btn" data-act="memoCancel"' + da + '>취소</button><button class="btn primary" data-act="memoSave"' + da + '>저장</button>'
+        ? '<button class="btn primary" data-act="memoSave"' + da + '>저장</button>'
         : '<button class="btn" data-act="memoCopy"' + da + '>복사</button><button class="btn" data-act="memoEdit"' + da + '>수정</button>') + '</div>');
     M.el.style.width = 'min(560px,100%)';
     if (editing) setTimeout(() => { const ta = M.el.querySelector('#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
@@ -2419,7 +2419,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
       openModal(() => '<h3>엑셀 양식 수정</h3><div class="form"><label>양식 이름</label><input id="xName" value="' + esc(x.name) + '">' +
         '<label>복사할 시트</label><div class="xsheets">' + sheetBoxes(x.all, x.sheets) + '</div></div><div class="err" id="xErr"></div>' +
-        '<div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xlsxEditSave" data-id="' + x.id + '">저장</button></div>');
+        '<div class="modal-actions"><button class="btn primary" data-act="xlsxEditSave" data-id="' + x.id + '">저장</button></div>');
     },
     xlsxEditSave(el) {
       const x = S.xlsx.find(q => String(q.id) === el.dataset.id); if (!x) return;
@@ -2451,7 +2451,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     substitute(el) { L.subTask(el.dataset.key); commit(); },
     memo(el) { openMemo(Number(el.dataset.id), el.dataset.key || '', false); },
     memoEdit(el) { openMemo(Number(el.dataset.id), el.dataset.key || '', true); },
-    memoCancel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)), k = el.dataset.key || ''; if (t && (t.memo || occMemo(k))) openMemo(t.id, k, false); else closeModal(); },
     memoSave(el) {
       const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return;
       const k = el.dataset.key || '', v = ($('#memoEd') || {}).value || '', chk = $('#memoOccChk');
@@ -3371,7 +3370,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<input id="xbSheet" placeholder="시트" value="' + esc(xiForm.bulk.sheet) + '"><input id="xbCol" class="sm" placeholder="열 (F)" value="' + esc(xiForm.bulk.col) + '">' +
       '<input id="xbStart" class="sm" placeholder="시작 행" value="' + esc(xiForm.bulk.start) + '" inputmode="numeric"><button type="button" class="btn" data-act="xiBulk">＋ 3개 만들기</button>' +
       '<span>→ {이름합계} {이름100원미만} {이름100원미만제외} (만든 뒤 이름은 바꿀 수 있어요)</span></div>' +
-      '<div class="err" id="xiErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xiSave">저장</button></div>', true);
+      '<div class="err" id="xiErr"></div><div class="modal-actions"><button class="btn primary" data-act="xiSave">저장</button></div>', true);
     M.el.style.width = 'min(860px,100%)';
     xiForm.read = () => {
       M.el.querySelectorAll('.xi-row input, .xi-row select').forEach(inp => { const x = xiForm.items[Number(inp.dataset.i)]; if (x && !inp.disabled) x[inp.dataset.f] = inp.value; });
@@ -3448,7 +3447,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       ((S.settle.xItems || []).length ? '<div class="tkrow"><span class="tkl e">엑셀</span>' + chips(S.settle.xItems.map(x => x.name), 'e') + '</div>' : '') +
       dlNames.map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
       '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
-      '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
+      '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
     M.el.style.width = 'min(720px,100%)';
     const check = () => {
       const ed = M.el.querySelector('#nBody');
@@ -3496,7 +3495,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="fm-items" id="dTok"></div>' +
       '<label>규칙 종류</label><select id="rType">' + Object.entries(L.RULE_TYPES).map(([k, n]) => '<option value="' + k + '"' + (r.type === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select><div id="rFields"></div></div>' +
       '<div class="rex" id="rEx"></div><div class="err" id="rErr"></div><div class="modal-actions">' + (cur ? '<button class="btn danger" data-act="dlDel" data-id="' + cur.id + '" style="margin-right:auto">삭제</button>' : '') +
-      '<button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="dlSave" data-id="' + (cur ? cur.id : 0) + '">저장</button></div>');
+      '<button class="btn primary" data-act="dlSave" data-id="' + (cur ? cur.id : 0) + '">저장</button></div>');
     const g = id => M.el.querySelector('#' + id);
     const read = () => {
       if (g('dName')) f.name = g('dName').value;
@@ -3540,7 +3539,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const c = calcSettle(), d = c.deadlines.find(x => x.id === did); if (!d) return;
     openModal(() => '<h3>"' + esc(d.name) + '" 마감 기한 직접 지정</h3><p class="hint2">' + c.y + '년 ' + c.m + '월분에만 적용돼요. 정산 대상 월을 바꾸면 설정한 마감 규칙이 다시 적용돼요.</p>' +
       '<div class="form"><label>마감 기한</label><input id="mDate" type="date" value="' + (d.date ? iso(d.date) : '') + '"></div><div class="err" id="mErr"></div>' +
-      '<div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="manualSave" data-id="' + did + '">적용</button></div>');
+      '<div class="modal-actions"><button class="btn primary" data-act="manualSave" data-id="' + did + '">적용</button></div>');
   }
 
   /* 엑셀 양식: 등록 · 복사 · 수정 · 삭제 */
@@ -3556,7 +3555,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     openModal(() => '<h3>엑셀 양식 등록</h3><div class="form"><label>양식 이름</label><input id="xName" value="' + esc(r.name) + '">' +
       '<label>복사할 시트 (선택한 시트만 복사돼요)</label><div class="xsheets">' + sheetBoxes(r.sheets, r.sheets) + '</div></div>' + warnBox(r.warnings) +
       '<div class="hint" style="margin-top:8px">선택한 파일은 이 프로그램 폴더(workspace_templates)에 사본으로 보관해서, 원본을 옮기거나 지워도 계속 쓸 수 있어요.</div>' +
-      '<div class="err" id="xErr"></div><div class="modal-actions"><button class="btn" data-act="mClose">취소</button><button class="btn primary" data-act="xlsxRegSave">등록</button></div>');
+      '<div class="err" id="xErr"></div><div class="modal-actions"><button class="btn primary" data-act="xlsxRegSave">등록</button></div>');
   }
   async function xlsxRegSave() {
     const name = $('#xName').value.trim(), sel = [...document.querySelectorAll('.xSheet')].filter(b => b.checked).map(b => b.value);
