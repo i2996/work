@@ -937,8 +937,12 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ── 모달 ── */
 .modal-bg{position:fixed;inset:0;background:rgba(70,64,100,.28);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
-.modal{width:min(520px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#fff;border-radius:20px;padding:22px;box-shadow:0 24px 70px rgba(50,45,90,.25)}
-.modal h3{margin:0 0 14px;font-size:17px}
+.modal{position:relative;width:min(520px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#fff;border-radius:20px;padding:22px;box-shadow:0 24px 70px rgba(50,45,90,.25)}
+.modal h3{margin:0 0 14px;font-size:17px;padding-right:34px}
+/* 팝업 닫기: 오른쪽 위 ✕ */
+.modal-x{position:absolute;top:14px;right:14px;width:32px;height:32px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:20px;line-height:1;display:grid;place-items:center;z-index:1}
+.modal-x:hover{background:#f1f0f8;color:var(--text)}
+.modal-actions:empty{display:none}
 .modal h3 .hol{font-size:12px;font-weight:600;color:#d77f9f;margin-left:6px}
 .form{display:grid;gap:8px}
 .form label{font-size:12px;color:var(--muted);font-weight:600;margin-top:4px}
@@ -1945,9 +1949,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     back.innerHTML = '<div class="modal"></div>';
     document.body.appendChild(back);
     const el = back.firstChild;
-    el.innerHTML = builder();
+    const X = '<button type="button" class="modal-x" data-act="mClose" title="닫기 (Esc)" aria-label="닫기">✕</button>';
+    el.innerHTML = X + builder();
     back.addEventListener('mousedown', e => { if (e.target === back) closeModal(); });
-    curModal = { el, refresh: refreshable ? () => { el.innerHTML = builder(); } : null };
+    curModal = { el, refresh: refreshable ? () => { el.innerHTML = X + builder(); } : null };
     return curModal;
   }
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
@@ -2002,7 +2007,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         '<div class="hint2" style="margin:-2px 0 4px">이번만 하는 업무로 바로 등록돼요. 오른쪽 날짜는 마감일(선택)이에요. 비우면 이 날 하루짜리 업무예요.<br>할 일·반복·세부 업무는 아래 버튼으로 등록해요.</div>' +
         '<div class="modal-actions"><button class="btn" data-act="newEvent" data-date="' + ds + '">＋ 일정</button><button class="btn" data-act="newTodo" data-date="' + ds + '">＋ 할 일</button>' +
         '<button class="btn" data-act="newTask" data-date="' + ds + '">＋ 업무 자세히 등록</button>' +
-        '<button class="btn" data-act="mClose">닫기</button></div>';
+        '</div>';
       return h;
     }, true);
     setTimeout(() => { const i = $('#dayIn'); if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') acts.dayAdd(i.nextElementSibling); }); }, 0);
@@ -2033,7 +2038,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return r;
   }
   async function openSettings() {
-    if (!hasPy()) { openModal(() => '<h3>설정</h3><p class="hint2">설정은 WorkSpace.exe 로 실행할 때 사용할 수 있어요.</p><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>'); return; }
+    if (!hasPy()) { openModal(() => '<h3>설정</h3><p class="hint2">설정은 WorkSpace.exe 로 실행할 때 사용할 수 있어요.</p><div class="modal-actions"></div>'); return; }
     const c = await api().get_config();
     const M = openModal(() => '<h3>설정</h3><div class="form"><label>현재 버전</label><div class="verline">' + esc(c.version) + '</div>' +
       '<label>GitHub 저장소 (주소 끝의 아이디/저장소이름)</label><input id="cfgRepo" value="' + esc(c.repo) + '" placeholder="예: myname/workspace">' +
@@ -2061,7 +2066,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="pp-grid">' + opts.map(([n, d]) => '<button type="button" class="pp-opt" data-act="ppApply" data-key="' + key + '" data-date="' + iso(d) + '"><b>' + n + '</b><span>' + fmtMD(d) + '</span></button>').join('') + '</div>' +
       '<div class="form"><label>날짜 직접 선택</label></div><div class="quick pp-quick"><input id="ppDate" type="date" min="' + iso(today()) + '" value="' + iso(L.nextWork(addDays(base, 1))) + '">' +
       '<button type="button" data-act="ppCustom" data-key="' + key + '">적용</button></div>' +
-      '<div class="modal-actions"><button class="btn" data-act="mClose">닫기</button></div>');
+      '<div class="modal-actions"></div>');
   }
 
   /* 업무 / 할 일 등록 · 수정 (할 일도 업무처럼 반복 설정 가능) */
@@ -2183,7 +2188,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<button class="btn" data-act="evEdit" data-id="' + x.id + '">수정</button>' +
           '<button class="btn danger" data-act="delEv" data-id="' + x.id + '">삭제</button></div>';
       }
-      return h + '</div><div class="modal-actions"><button class="btn" data-act="newEvent" data-date="">＋ 일정</button><button class="btn" data-act="newTodo" data-date="">＋ 할 일 (반복 설정)</button><button class="btn primary" data-act="newTask" data-date="">＋ 업무 등록</button><button class="btn" data-act="mClose">닫기</button></div>';
+      return h + '</div><div class="modal-actions"><button class="btn" data-act="newEvent" data-date="">＋ 일정</button><button class="btn" data-act="newTodo" data-date="">＋ 할 일 (반복 설정)</button><button class="btn primary" data-act="newTask" data-date="">＋ 업무 등록</button></div>';
     }, true);
   }
 
@@ -2197,7 +2202,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           '<button class="btn danger" data-act="delHol" data-date="' + esc(x.date) + '">삭제</button></div>';
       }
       return h + '</div><div class="form-row"><input id="hDate" type="date"><input id="hName" placeholder="이름 (선택)"></div>' +
-        '<div class="err" id="hErr"></div><div class="modal-actions"><button class="btn primary" data-act="addHol">추가</button><button class="btn" data-act="mClose">닫기</button></div>';
+        '<div class="err" id="hErr"></div><div class="modal-actions"><button class="btn primary" data-act="addHol">추가</button></div>';
     }, true);
   }
 
@@ -2241,7 +2246,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
           (String(t.memo || '').trim() ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<div class="memo-view">' + esc(t.memo) + '</div>' : '')) +
       '<div class="modal-actions">' + (editing
         ? '<button class="btn" data-act="memoCancel"' + da + '>취소</button><button class="btn primary" data-act="memoSave"' + da + '>저장</button>'
-        : '<button class="btn" data-act="memoCopy"' + da + '>복사</button><button class="btn" data-act="memoEdit"' + da + '>수정</button><button class="btn primary" data-act="mClose">닫기</button>') + '</div>');
+        : '<button class="btn" data-act="memoCopy"' + da + '>복사</button><button class="btn" data-act="memoEdit"' + da + '>수정</button>') + '</div>');
     M.el.style.width = 'min(560px,100%)';
     if (editing) setTimeout(() => { const ta = M.el.querySelector('#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
   }
@@ -3002,7 +3007,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* ───────── 양식 (안내문 양식 · 엑셀 양식) ───────── */
-  const infoModal = (title, msg, extra) => openModal(() => '<h3>' + esc(title) + '</h3><p class="hint2" style="white-space:pre-line;font-size:13px;color:var(--text)">' + esc(msg) + '</p><div class="modal-actions">' + (extra || '') + '<button class="btn" data-act="mClose">닫기</button></div>');
+  const infoModal = (title, msg, extra) => openModal(() => '<h3>' + esc(title) + '</h3><p class="hint2" style="white-space:pre-line;font-size:13px;color:var(--text)">' + esc(msg) + '</p><div class="modal-actions">' + (extra || '') + '</div>');
   const noPy = () => infoModal('사용할 수 없어요', '엑셀 양식 복사는 WorkSpace.exe 로 실행할 때만 사용할 수 있어요.');
   function copyText(text, el, label) {
     const ok = () => { if (!el) return; el.textContent = '복사됨 ✓'; setTimeout(() => { if (el.isConnected) el.textContent = label || '복사'; }, 1500); };
@@ -3572,7 +3577,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="form"><label>복사할 시트</label><select id="cSheet">' + x.sheets.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('') + '</select>' +
       '<label>위에서부터 몇 행을 복사할까요?</label><div class="rrow"><input id="cRows" type="number" min="1" max="200" value="1">' +
       '<button class="btn" data-act="clipRows" data-n="1">첫 행만</button><button class="btn" data-act="clipRows" data-n="3">3행</button><button class="btn" data-act="clipRows" data-n="200">전체</button></div></div>' +
-      '<div class="err" id="cMsg"></div><div class="modal-actions"><button class="btn" data-act="mClose">닫기</button><button class="btn primary" data-act="clipGo" data-id="' + x.id + '">클립보드로 복사</button></div>');
+      '<div class="err" id="cMsg"></div><div class="modal-actions"><button class="btn primary" data-act="clipGo" data-id="' + x.id + '">클립보드로 복사</button></div>');
   }
   async function clipGo(id) {
     const x = (S.xlsx || []).find(q => String(q.id) === String(id)); if (!x) return;
