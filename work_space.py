@@ -1019,6 +1019,15 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .cl-grp.folded .cl-h.fold{padding-bottom:0}
 .cl-grp.folded .cl-h.fold .arr{transform:rotate(0deg)}
 .tag.sub{background:#eef0f8;color:#6a74a8}
+/* 업무 옆 ☑ 표시를 누르면 그 업무 아래에 세부 업무 체크리스트가 펼쳐짐 */
+.tag.sub.sub-tog{cursor:pointer;border:1px solid #dfe3f3}
+.tag.sub.sub-tog:hover{background:#e2e6f6}
+.tag.sub.sub-tog.on{background:#6a74a8;color:#fff;border-color:#6a74a8}
+.subs-box{background:#f8f6fd;border:1px solid #ece6f8;border-radius:10px;padding:4px 10px}
+.subs-box .tr:last-child{border-bottom:0}
+.rw-subs{padding:6px 16px 10px 28px;border-bottom:1px solid var(--line2);background:#fcfbff}
+.mt-subs{margin:-2px 0 6px 10px}
+.mitem-subs{margin:-2px 0 4px 14px}
 .subrow{display:flex;gap:6px;margin-bottom:2px}
 .subrow input{flex:1}
 .subrow .x{width:36px;color:#b9b7c9}
@@ -1129,6 +1138,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .bar .memo-ic svg,.wcard .memo-ic svg{width:10px;height:10px}
 .memo-view{white-space:pre-wrap;word-break:break-word;line-height:1.75;font-size:14px;background:#fffbea;border:1px solid #f3e6b8;border-radius:12px;padding:14px 16px;max-height:55vh;overflow:auto;color:#4a4636}
 .memo-edit{width:100%;min-height:200px;resize:vertical;line-height:1.7;font-size:14px;padding:12px 14px}
+.memo-lab{font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 5px}
+.memo-lab:first-of-type{margin-top:0}
+.memo-view.occ{background:#eef6ff;border-color:#cfe2f7;color:#2f4a63}
 .bar,.wcard{cursor:pointer;transition:filter .12s,box-shadow .12s}
 .bar:hover,.wcard:hover{filter:brightness(.95);box-shadow:0 1px 5px rgba(70,60,120,.22)}
 
@@ -1520,6 +1532,7 @@ const WSLogic = (function () {
     for (const k of Object.keys(ctx.S.prog)) if (k === 't' + id || k.startsWith('t' + id + '@')) delete ctx.S.prog[k];
     for (const k of Object.keys(ctx.S.subdone || {})) if (k.startsWith('t' + id + ':') || k.startsWith('t' + id + '@')) delete ctx.S.subdone[k];
     for (const k of Object.keys(ctx.S.skip || {})) if (k.startsWith('t' + id + '@')) delete ctx.S.skip[k];
+    for (const k of Object.keys(ctx.S.occMemo || {})) if (k.startsWith('t' + id + '@')) delete ctx.S.occMemo[k];
   }
 
   function toggleRT(key) {
@@ -1536,6 +1549,7 @@ const WSLogic = (function () {
     ctx.S.skip[key] = 1;
     delete ctx.S.prog[key];
     if (ctx.S.rdone) delete ctx.S.rdone[key];
+    if (ctx.S.occMemo) delete ctx.S.occMemo[key];
     for (const k of Object.keys(ctx.S.subdone || {})) if (k.startsWith(key + ':')) delete ctx.S.subdone[k];
   }
 
@@ -1856,7 +1870,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   let S = null, curModal = null, form = null, pinned = true, lastDay = '';
   const t0 = today();
   const ui = { tab: 'sum', calY: t0.getFullYear(), calM: t0.getMonth() + 1, listY: t0.getFullYear(), listM: t0.getMonth() + 1,
-    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, combo: null, dlOpen: new Set(), editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
+    statY: t0.getFullYear(), statM: t0.getMonth() + 1, logDate: '', statKind: 'all', formTab: 'notice', noticeId: 0, combo: null, dlOpen: new Set(), subOpen: new Set(), editTodo: null, calView: 'month', calWeek: addDays(t0, -t0.getDay()), calSel: new Set(), miniY: t0.getFullYear(), miniM: t0.getMonth() + 1 };
 
   /* ── 저장 / 불러오기 ── */
   const hasPy = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.load_state);
@@ -1885,7 +1899,18 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return weeks;
   }
   const soonOf = o => { if (o.kind !== 'task' || stOf(o.key) === 'done') return false; const n = diffDays(o.end, today()); return n >= 1 && n <= 2; };   // 마감까지 3일 미만
-  const subTag = o => { const c = L.subCount(o); return c.total ? '<span class="tag sub" title="세부 업무 체크리스트">☑ ' + c.done + '/' + c.total + '</span>' : ''; };
+  const subTag = o => {
+    const c = L.subCount(o); if (!c.total) return '';
+    const open = ui.subOpen.has(o.key);
+    return '<span class="tag sub sub-tog' + (open ? ' on' : '') + '" role="button" data-act="subOpen" data-key="' + o.key + '" title="세부 업무 체크리스트 ' + (open ? '접기' : '펼치기') + '">☑ ' + c.done + '/' + c.total + ' ' + (open ? '▾' : '▸') + '</span>';
+  };
+  /* 펼친 업무의 세부 업무 체크리스트 (체크하면 근무일지에 그날 담기고, 모두 체크하면 업무 자동 완료) */
+  function subList(o, cls) {
+    if (!ui.subOpen.has(o.key) || !L.subsOf(o).length) return '';
+    return '<div class="' + cls + '"><div class="subs-box">' + L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
+      return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
+        '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div></div>';
+  }
   const ppBtn = o => (L.canPostpone(o) ? '<button class="action later" data-act="postpone" data-key="' + o.key + '" title="마감을 뒤로 미뤄요">미루기</button>' : '');
   const periodText = o => (iso(o.start) === iso(o.end) ? fmtMD(o.end) : fmtMD(o.start) + ' ~ ' + fmtMD(o.end));
   function dueCell(o) {
@@ -1942,10 +1967,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (!tasks.length && !plainTodos.length && !rts.length && !evs.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
       for (const o of tasks) {
         const pk = L.pinkOf(o);
-        h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + memoIcon(o) + '</b><span>' + periodText(o) +
+        h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + memoIcon(o) + subTag(o) + '</b><span>' + periodText(o) +
           (o.task.type !== 'once' ? ' · 매월 반복' : '') + '</span></div>' + stateCell(o, true) +
           '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button>' +
-          xb('dayDelTask', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
+          xb('dayDelTask', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>' + subList(o, 'mitem-subs');
       }
       for (const o of evs) {
         const multi = iso(o.start) !== iso(o.end);
@@ -2051,7 +2076,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
       '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>' +
-      '<div class="hint">\'진행\'을 누르면 업무를 완료할 때까지 TO-DO에 표시돼요. (기간 안에는 시작 전에도 보여요) 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
+      '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
       (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>'
         : !isNew && kind === 'event' ? '<button class="btn danger" data-act="fDelEv" style="margin-right:auto">삭제</button>' : '') +
@@ -2164,23 +2189,32 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   /* ── 업무별 참고 메모 ── 메모가 있는 업무 이름 옆에 아이콘, 누르면 팝업 */
   const MEMO_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M9 11h6M9 15h6"/></svg>';
+  /* 반복 업무는 '모든 달 공통' 메모(task.memo) + '이번 달만' 메모(S.occMemo[발생 key]) */
+  const occKeyOf = o => (o && o.task && o.task.type !== 'once' && o.key && o.key.indexOf('@') > 0 ? o.key : '');
+  const occMemo = key => (key ? String((S.occMemo || {})[key] || '') : '');
+  const occLabel = key => { const m = /@(\d{4})-(\d{2})$/.exec(key || ''); return m ? (+m[2]) + '월' : ''; };
   function memoIcon(o) {
-    const t = o && o.task;
-    if (!t || !t.memo || !String(t.memo).trim()) return '';
-    const first = String(t.memo).trim().split('\n')[0].slice(0, 60);
-    return '<span class="memo-ic" role="button" data-act="memo" data-id="' + t.id + '" title="참고 메모: ' + esc(first) + '">' + MEMO_SVG + '</span>';
+    const t = o && o.task; if (!t) return '';
+    const key = occKeyOf(o), om = occMemo(key).trim(), cm = String(t.memo || '').trim();
+    if (!om && !cm) return '';
+    const first = (om || cm).split('\n')[0].slice(0, 60);
+    return '<span class="memo-ic" role="button" data-act="memo" data-id="' + t.id + '" data-key="' + key + '" title="참고 메모' + (om ? ' (' + occLabel(key) + '만)' : '') + ': ' + esc(first) + '">' + MEMO_SVG + '</span>';
   }
-  function openMemo(id, editing) {
+  function openMemo(id, key, editing) {
     const t = S.tasks.find(x => x.id === id); if (!t) return;
+    const rep = t.type !== 'once', om = occMemo(key), ml = occLabel(key);
+    const da = ' data-id="' + id + '" data-key="' + (key || '') + '"';
     const M = openModal(() => '<h3>' + esc(t.title) + ' <span style="font-size:12px;font-weight:600;color:var(--muted);margin-left:4px">참고 메모</span></h3>' +
-      (editing ? '<textarea id="memoEd" class="memo-edit" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용을 적어 두세요 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>'
-        : '<div class="memo-view">' + esc(t.memo || '') + '</div>') +
-      (t.type !== 'once' ? '<p class="hint2" style="margin:8px 0 0">매월 반복 업무라 모든 달에 같은 메모가 보여요.</p>' : '') +
+      (editing
+        ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<textarea id="memoEd" class="memo-edit"' + (rep && key ? ' style="min-height:130px"' : '') + ' spellcheck="false" placeholder="이 업무를 할 때 참고할 내용을 적어 두세요 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>' +
+          (rep && key ? '<div class="memo-lab">' + ml + '만 (다른 달에는 안 보여요)</div><textarea id="memoOcc" class="memo-edit" style="min-height:100px" spellcheck="false" placeholder="이번 달에만 필요한 내용 (예: 이번 달은 ○○ 확인)">' + esc(om) + '</textarea>' : '')
+        : (om.trim() ? '<div class="memo-lab">' + ml + '만</div><div class="memo-view occ">' + esc(om) + '</div>' : '') +
+          (String(t.memo || '').trim() ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<div class="memo-view">' + esc(t.memo) + '</div>' : '')) +
       '<div class="modal-actions">' + (editing
-        ? (t.memo ? '<button class="btn danger" data-act="memoDel" data-id="' + id + '" style="margin-right:auto">메모 지우기</button>' : '') + '<button class="btn" data-act="memoCancel" data-id="' + id + '">취소</button><button class="btn primary" data-act="memoSave" data-id="' + id + '">저장</button>'
-        : '<button class="btn" data-act="memoCopy" data-id="' + id + '">복사</button><button class="btn" data-act="memoEdit" data-id="' + id + '">수정</button><button class="btn primary" data-act="mClose">닫기</button>') + '</div>');
+        ? '<button class="btn" data-act="memoCancel"' + da + '>취소</button><button class="btn primary" data-act="memoSave"' + da + '>저장</button>'
+        : '<button class="btn" data-act="memoCopy"' + da + '>복사</button><button class="btn" data-act="memoEdit"' + da + '>수정</button><button class="btn primary" data-act="mClose">닫기</button>') + '</div>');
     M.el.style.width = 'min(560px,100%)';
-    if (editing) setTimeout(() => { const ta = M.el.querySelector('#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
+    if (editing) setTimeout(() => { const ta = M.el.querySelector(om ? '#memoOcc' : '#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
   }
 
   /* ── 상태 버튼 / 칩 ── */
@@ -2236,13 +2270,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       S.prog['t' + id] = { s: 'doing', at: ts };
       i.value = ''; commit();
     },
-    clFold(el) {
-      const k = el.dataset.key, f = Object.assign({}, S.clFold);
-      if (f[k]) delete f[k]; else f[k] = 1;
-      // 더 이상 체크리스트에 없는 업무의 접기 기록은 정리
-      const live = new Set(L.activeChecklists().map(o => o.key)); Object.keys(f).forEach(x => { if (!live.has(x)) delete f[x]; });
-      S.clFold = f; commit();
-    },
+    subOpen(el) { const k = el.dataset.key; if (ui.subOpen.has(k)) ui.subOpen.delete(k); else ui.subOpen.add(k); render(); },
     todoFold() { S.todoFold = Object.assign({}, S.todoFold, { [MODE]: !(S.todoFold || {})[MODE] }); commit(); },
     logSubs() { S.logSubs = S.logSubs === false; commit(); },
     formTab(el) { ui.formTab = el.dataset.v; renderPanel(); },
@@ -2387,17 +2415,21 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     start(el) { L.startTask(el.dataset.key); commit(); },
     finish(el) { L.finishTask(el.dataset.key); commit(); },
     substitute(el) { L.subTask(el.dataset.key); commit(); },
-    memo(el) { openMemo(Number(el.dataset.id), false); },
-    memoEdit(el) { openMemo(Number(el.dataset.id), true); },
-    memoCancel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (t && t.memo) openMemo(t.id, false); else closeModal(); },
+    memo(el) { openMemo(Number(el.dataset.id), el.dataset.key || '', false); },
+    memoEdit(el) { openMemo(Number(el.dataset.id), el.dataset.key || '', true); },
+    memoCancel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)), k = el.dataset.key || ''; if (t && (t.memo || occMemo(k))) openMemo(t.id, k, false); else closeModal(); },
     memoSave(el) {
       const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return;
-      const v = ($('#memoEd') || {}).value || '';
+      const k = el.dataset.key || '', v = ($('#memoEd') || {}).value || '', ov = $('#memoOcc');
       if (v.trim()) t.memo = v.replace(/\s+$/, ''); else delete t.memo;
-      commit(); if (t.memo) openMemo(t.id, false); else closeModal();
+      if (ov && k) { S.occMemo = S.occMemo || {}; if (ov.value.trim()) S.occMemo[k] = ov.value.replace(/\s+$/, ''); else delete S.occMemo[k]; }
+      commit(); if (t.memo || occMemo(k)) openMemo(t.id, k, false); else closeModal();
     },
-    memoDel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return; confirmBox('"' + t.title + '" 업무의 참고 메모를 지울까요?', '지우기', () => { delete t.memo; commit(); }, () => openMemo(t.id, true)); },
-    memoCopy(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (t) copyText(t.memo || '', el, '복사'); },
+    memoCopy(el) {
+      const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return;
+      const om = occMemo(el.dataset.key || '').trim(), cm = String(t.memo || '').trim();
+      copyText([om, cm].filter(Boolean).join('\n\n'), el, '복사');
+    },
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
@@ -2628,7 +2660,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     return '<button type="button" class="side-title fold-t" data-act="todoFold" title="접기 / 펼치기">3일 업무 TO-DO<span class="cnt" id="tdFoldCnt" title="남은 할 일"></span><span class="arr">▶</span></button><div class="todo-scroll">' +
       '<div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div>' +
       '<div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div>' +
-      '<div id="clWrap"><div class="grp-t cl">업무 체크리스트</div><div id="tdCl"></div></div>' +
       '<div class="grp-t" id="tdTomT"></div><div class="quick"><input id="tdTomIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="tomorrow">＋</button></div><div id="tdTom"></div></div>';
   }
   const PENCIL = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
@@ -2674,17 +2705,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     fill('tdToday', S.todos.filter(x => L.todoOn(x, t)), false, L.rtodoRange(t, t, true));
     fill('tdTom', S.todos.filter(x => L.todoOn(x, addDays(t, 1))), false, L.rtodoRange(addDays(t, 1), addDays(t, 1), true));
     $('#tdPastWrap').classList.toggle('hidden', !past.length);
-    const cls = L.activeChecklists();
-    $('#clWrap').classList.toggle('hidden', !cls.length);
-    $('#tdCl').innerHTML = cls.map(o => {
-      const c = L.subCount(o), fold = !!(S.clFold || {})[o.key];
-      // 업무 이름 줄을 누르면 세부 업무를 접고 펼쳐요 (접어도 체크한 수는 보여요)
-      return '<div class="cl-grp' + (fold ? ' folded' : '') + '"><button type="button" class="cl-h fold" data-act="clFold" data-key="' + o.key + '" title="' + (fold ? '세부 업무 펼치기' : '세부 업무 접기') + '"><b>' + esc(o.title) + memoIcon(o) + '</b><span>' + c.done + '/' + c.total +
-        (iso(o.end) !== ts ? ' · ~' + fmtMD(o.end) : '') + ' <span class="arr">▶</span></span></button>' +
-        (fold ? '' : L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
-          return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
-            '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('')) + '</div>';
-    }).join('');
     $('#tdTodayT').textContent = '오늘 (' + pad2(t.getMonth() + 1) + '/' + pad2(t.getDate()) + ')';
     const n = addDays(t, 1);
     $('#tdTomT').textContent = '내일 (' + pad2(n.getMonth() + 1) + '/' + pad2(n.getDate()) + ')';
@@ -2728,7 +2748,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         '<button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>'
       : ppBtn(o) + stateCell(o);
     return '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="c-t">' + esc(o.title) + memoIcon(o) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-      '</div><div class="c-m">' + dueCell(o) + dTag(o) + '</div><div class="c-a">' + acts + '</div></div>';
+      '</div><div class="c-m">' + dueCell(o) + dTag(o) + '</div><div class="c-a">' + acts + '</div></div>' + subList(o, 'rw-subs');
   }
   /* 마감까지 3~6일 남은 업무에도 D-n 표시 (0~2일은 dueCell 이 이미 표시) */
   function dTag(o) {
@@ -2763,7 +2783,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const o of list) {
       const st = stOf(o.key);
       h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + memoIcon(o) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
-        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + stateCell(o) + '</div></div>';
+        '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + stateCell(o) + '</div></div>' + subList(o, 'rw-subs');
     }
     return h + '</div>';
   }
@@ -3554,9 +3574,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const o of list) {
       const n = diffDays(o.end, t), st = stOf(o.key), pk = L.pinkOf(o);
       const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
-      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + memoIcon(o) + '<small>' + sub + '</small></div>' + ppBtn(o) +
+      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + memoIcon(o) + subTag(o) + '<small>' + sub + '</small></div>' + ppBtn(o) +
         (st === 'doing' ? '<button class="action finish" data-act="finish" data-key="' + o.key + '">완료</button>'
-          : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>';
+          : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>' + subList(o, 'mt-subs');
     }
     $('#miniTasks').innerHTML = h;
   }
