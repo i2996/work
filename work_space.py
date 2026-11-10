@@ -1121,6 +1121,14 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* 달력의 업무 막대/카드: 눌러서 바로 수정 */
 .bars .bar,.wk-span .bar{pointer-events:auto}
+/* 업무별 참고 메모 아이콘 · 팝업 */
+.memo-ic{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:5px;vertical-align:-3px;border-radius:5px;color:#b08a1e;background:#fff3c4;cursor:pointer;flex:none}
+.memo-ic:hover{background:#ffe48a;color:#7d5f0c}
+.memo-ic svg{width:12px;height:12px}
+.bar .memo-ic,.wcard .memo-ic{width:15px;height:15px;margin:0 3px 0 0;vertical-align:-2px;background:rgba(255,255,255,.75)}
+.bar .memo-ic svg,.wcard .memo-ic svg{width:10px;height:10px}
+.memo-view{white-space:pre-wrap;word-break:break-word;line-height:1.75;font-size:14px;background:#fffbea;border:1px solid #f3e6b8;border-radius:12px;padding:14px 16px;max-height:55vh;overflow:auto;color:#4a4636}
+.memo-edit{width:100%;min-height:200px;resize:vertical;line-height:1.7;font-size:14px;padding:12px 14px}
 .bar,.wcard{cursor:pointer;transition:filter .12s,box-shadow .12s}
 .bar:hover,.wcard:hover{filter:brightness(.95);box-shadow:0 1px 5px rgba(70,60,120,.22)}
 
@@ -1934,7 +1942,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (!tasks.length && !plainTodos.length && !rts.length && !evs.length) h += '<div class="tempty">등록된 일정이 없어요</div>';
       for (const o of tasks) {
         const pk = L.pinkOf(o);
-        h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + '</b><span>' + periodText(o) +
+        h += '<div class="mitem ' + (pk ? 'pinkrow' : '') + '"><div class="mt"><b>' + esc(o.title) + memoIcon(o) + '</b><span>' + periodText(o) +
           (o.task.type !== 'once' ? ' · 매월 반복' : '') + '</span></div>' + stateCell(o, true) +
           '<button class="btn" data-act="editTask" data-id="' + o.id + '">수정</button>' +
           xb('dayDelTask', 'data-key="' + o.key + '" data-id="' + o.id + '" data-date="' + ds + '"') + '</div>';
@@ -2042,6 +2050,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div id="fTaskOnly" class="form"><label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
+      '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>' +
       '<div class="hint">\'진행\'을 누르면 업무를 완료할 때까지 TO-DO에 표시돼요. (기간 안에는 시작 전에도 보여요) 기간 안에는 다 못 해도 지연으로 보지 않아요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
       (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>'
@@ -2052,6 +2061,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (g('fTitle')) t.title = g('fTitle').value.trim();
       if (g('fTime')) t.time = g('fTime').value;
       if (g('fLogSubs')) t.logSubs = g('fLogSubs').checked;
+      if (g('fMemo')) { const mv = g('fMemo').value; if (mv.trim()) t.memo = mv.replace(/\s+$/, ''); else delete t.memo; }
       M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) {
         t.start = g('fStart').value;
@@ -2120,7 +2130,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       let h = '<h3>등록된 업무 관리</h3><p class="hint2">반복 업무를 지우면 모든 달에서 사라져요.</p><div class="mlist">';
       if (!S.tasks.length && !(S.rtodos || []).length && !(S.events || []).length) h += '<div class="tempty">등록된 업무가 없어요</div>';
       for (const t of S.tasks.slice().sort((a, b) => a.title.localeCompare(b.title, 'ko'))) {
-        h += '<div class="mitem"><div class="mt"><b>' + esc((t.time ? t.time + ' ' : '') + t.title) + '</b><span>' + esc(L.describeTask(t)) + '</span></div>' +
+        h += '<div class="mitem"><div class="mt"><b>' + esc((t.time ? t.time + ' ' : '') + t.title) + memoIcon({ task: t }) + '</b><span>' + esc(L.describeTask(t)) + '</span></div>' +
           '<button class="btn" data-act="editTask" data-id="' + t.id + '">수정</button>' +
           '<button class="btn danger" data-act="delTask" data-id="' + t.id + '">삭제</button></div>';
       }
@@ -2150,6 +2160,27 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return h + '</div><div class="form-row"><input id="hDate" type="date"><input id="hName" placeholder="이름 (선택)"></div>' +
         '<div class="err" id="hErr"></div><div class="modal-actions"><button class="btn primary" data-act="addHol">추가</button><button class="btn" data-act="mClose">닫기</button></div>';
     }, true);
+  }
+
+  /* ── 업무별 참고 메모 ── 메모가 있는 업무 이름 옆에 아이콘, 누르면 팝업 */
+  const MEMO_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M9 11h6M9 15h6"/></svg>';
+  function memoIcon(o) {
+    const t = o && o.task;
+    if (!t || !t.memo || !String(t.memo).trim()) return '';
+    const first = String(t.memo).trim().split('\n')[0].slice(0, 60);
+    return '<span class="memo-ic" role="button" data-act="memo" data-id="' + t.id + '" title="참고 메모: ' + esc(first) + '">' + MEMO_SVG + '</span>';
+  }
+  function openMemo(id, editing) {
+    const t = S.tasks.find(x => x.id === id); if (!t) return;
+    const M = openModal(() => '<h3>' + esc(t.title) + ' <span style="font-size:12px;font-weight:600;color:var(--muted);margin-left:4px">참고 메모</span></h3>' +
+      (editing ? '<textarea id="memoEd" class="memo-edit" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용을 적어 두세요 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>'
+        : '<div class="memo-view">' + esc(t.memo || '') + '</div>') +
+      (t.type !== 'once' ? '<p class="hint2" style="margin:8px 0 0">매월 반복 업무라 모든 달에 같은 메모가 보여요.</p>' : '') +
+      '<div class="modal-actions">' + (editing
+        ? (t.memo ? '<button class="btn danger" data-act="memoDel" data-id="' + id + '" style="margin-right:auto">메모 지우기</button>' : '') + '<button class="btn" data-act="memoCancel" data-id="' + id + '">취소</button><button class="btn primary" data-act="memoSave" data-id="' + id + '">저장</button>'
+        : '<button class="btn" data-act="memoCopy" data-id="' + id + '">복사</button><button class="btn" data-act="memoEdit" data-id="' + id + '">수정</button><button class="btn primary" data-act="mClose">닫기</button>') + '</div>');
+    M.el.style.width = 'min(560px,100%)';
+    if (editing) setTimeout(() => { const ta = M.el.querySelector('#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
   }
 
   /* ── 상태 버튼 / 칩 ── */
@@ -2356,6 +2387,17 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     start(el) { L.startTask(el.dataset.key); commit(); },
     finish(el) { L.finishTask(el.dataset.key); commit(); },
     substitute(el) { L.subTask(el.dataset.key); commit(); },
+    memo(el) { openMemo(Number(el.dataset.id), false); },
+    memoEdit(el) { openMemo(Number(el.dataset.id), true); },
+    memoCancel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (t && t.memo) openMemo(t.id, false); else closeModal(); },
+    memoSave(el) {
+      const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return;
+      const v = ($('#memoEd') || {}).value || '';
+      if (v.trim()) t.memo = v.replace(/\s+$/, ''); else delete t.memo;
+      commit(); if (t.memo) openMemo(t.id, false); else closeModal();
+    },
+    memoDel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return; confirmBox('"' + t.title + '" 업무의 참고 메모를 지울까요?', '지우기', () => { delete t.memo; commit(); }, () => openMemo(t.id, true)); },
+    memoCopy(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (t) copyText(t.memo || '', el, '복사'); },
     reset(el) { L.resetTask(el.dataset.key); commit(); },
     reopen(el) { const k = el.dataset.key, p = S.prog[k] || {}; S.prog[k] = { s: 'doing', at: p.at || iso(today()) }; commit(); },
     /* 월 이동 */
@@ -2637,7 +2679,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     $('#tdCl').innerHTML = cls.map(o => {
       const c = L.subCount(o), fold = !!(S.clFold || {})[o.key];
       // 업무 이름 줄을 누르면 세부 업무를 접고 펼쳐요 (접어도 체크한 수는 보여요)
-      return '<div class="cl-grp' + (fold ? ' folded' : '') + '"><button type="button" class="cl-h fold" data-act="clFold" data-key="' + o.key + '" title="' + (fold ? '세부 업무 펼치기' : '세부 업무 접기') + '"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
+      return '<div class="cl-grp' + (fold ? ' folded' : '') + '"><button type="button" class="cl-h fold" data-act="clFold" data-key="' + o.key + '" title="' + (fold ? '세부 업무 펼치기' : '세부 업무 접기') + '"><b>' + esc(o.title) + memoIcon(o) + '</b><span>' + c.done + '/' + c.total +
         (iso(o.end) !== ts ? ' · ~' + fmtMD(o.end) : '') + ' <span class="arr">▶</span></span></button>' +
         (fold ? '' : L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
           return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
@@ -2685,7 +2727,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       ? ppBtn(o) + '<button class="action sub" data-act="substitute"' + k + ' title="다른 사람이 대신 처리했어요 · 완료로 처리하고 근무일지에는 넣지 않아요">대직</button><button class="action finish" data-act="finish"' + k + '>✓ 완료</button>' +
         '<button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>'
       : ppBtn(o) + stateCell(o);
-    return '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
+    return '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="c-t">' + esc(o.title) + memoIcon(o) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
       '</div><div class="c-m">' + dueCell(o) + dTag(o) + '</div><div class="c-a">' + acts + '</div></div>';
   }
   /* 마감까지 3~6일 남은 업무에도 D-n 표시 (0~2일은 dueCell 이 이미 표시) */
@@ -2720,7 +2762,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     h += '<div class="table"><div class="rw head all"><div>업무</div><div>기간</div><div>마감</div><div style="text-align:right">상태</div></div>';
     for (const o of list) {
       const st = stOf(o.key);
-      h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
+      h += '<div class="rw all ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + (st === 'done' ? ' done' : '') + '"><div class="c-t">' + esc(o.title) + memoIcon(o) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
         '</div><div class="c-m">' + dueCell(o) + '</div><div class="c-a">' + ppBtn(o) + stateCell(o) + '</div></div>';
     }
     return h + '</div>';
@@ -2760,7 +2802,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (lane < 0) { lanes.push(ce); lane = lanes.length - 1; } else lanes[lane] = ce;
       const cls = calCls(e);
       bars += '<div class="bar ' + cls + (e.start < ws ? ' cl' : '') + (e.end > we ? ' cr' : '') + '" ' + editAttrs(e) + ' style="grid-column:' + (cs + 1) + '/' + (ce + 2) + ';grid-row:' + (lane + 1) +
-        '" title="' + esc(e.title) + '">' + (cls === 'done' ? '✓ ' : e.recurring ? '↻ ' : '') + esc(e.title) + '</div>';
+        '" title="' + esc(e.title) + '">' + memoIcon(e) + (cls === 'done' ? '✓ ' : e.recurring ? '↻ ' : '') + esc(e.title) + '</div>';
     }
     return { bars, n: lanes.length };
   }
@@ -2795,7 +2837,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const off = d.getDay() === 0 || d.getDay() === 6 || holName(d);
       return '<div class="wkc' + (iso(d) === ts ? ' today' : '') + (off ? ' off' : '') + '" data-act="day" data-date="' + iso(d) + '">' + items.map(e => {
         const c = calCls(e);
-        return '<div class="wcard ' + c + '" ' + editAttrs(e) + '><span class="wt">' + (e.recurring ? '↻ ' : '') + esc(e.title) + '</span><small>' + statusText(e) + '</small></div>';
+        return '<div class="wcard ' + c + '" ' + editAttrs(e) + '><span class="wt">' + memoIcon(e) + (e.recurring ? '↻ ' : '') + esc(e.title) + '</span><small>' + statusText(e) + '</small></div>';
       }).join('') + '</div>';
     }).join('') + '</div></div></div></div>';
     return h;
@@ -3512,7 +3554,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     for (const o of list) {
       const n = diffDays(o.end, t), st = stOf(o.key), pk = L.pinkOf(o);
       const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
-      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + '<small>' + sub + '</small></div>' + ppBtn(o) +
+      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + memoIcon(o) + '<small>' + sub + '</small></div>' + ppBtn(o) +
         (st === 'doing' ? '<button class="action finish" data-act="finish" data-key="' + o.key + '">완료</button>'
           : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>';
     }
