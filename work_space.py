@@ -1012,6 +1012,12 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .cl-h b{color:var(--lav-ink);word-break:break-all}
 .cl-h span{color:var(--muted);white-space:nowrap}
 .cl-grp .tr:last-child{border-bottom:0}
+/* 업무 체크리스트: 업무마다 세부 업무 접기 */
+.cl-h.fold{width:100%;border:0;background:transparent;padding:0 0 2px;text-align:left;cursor:pointer;align-items:center}
+.cl-h.fold .arr{font-size:9px;color:var(--muted);margin-left:2px;transition:transform .15s;transform:rotate(90deg);display:inline-block}
+.cl-grp.folded{padding-bottom:6px}
+.cl-grp.folded .cl-h.fold{padding-bottom:0}
+.cl-grp.folded .cl-h.fold .arr{transform:rotate(0deg)}
 .tag.sub{background:#eef0f8;color:#6a74a8}
 .subrow{display:flex;gap:6px;margin-bottom:2px}
 .subrow input{flex:1}
@@ -2199,6 +2205,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       S.prog['t' + id] = { s: 'doing', at: ts };
       i.value = ''; commit();
     },
+    clFold(el) {
+      const k = el.dataset.key, f = Object.assign({}, S.clFold);
+      if (f[k]) delete f[k]; else f[k] = 1;
+      // 더 이상 체크리스트에 없는 업무의 접기 기록은 정리
+      const live = new Set(L.activeChecklists().map(o => o.key)); Object.keys(f).forEach(x => { if (!live.has(x)) delete f[x]; });
+      S.clFold = f; commit();
+    },
     todoFold() { S.todoFold = Object.assign({}, S.todoFold, { [MODE]: !(S.todoFold || {})[MODE] }); commit(); },
     logSubs() { S.logSubs = S.logSubs === false; commit(); },
     formTab(el) { ui.formTab = el.dataset.v; renderPanel(); },
@@ -2622,12 +2635,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const cls = L.activeChecklists();
     $('#clWrap').classList.toggle('hidden', !cls.length);
     $('#tdCl').innerHTML = cls.map(o => {
-      const c = L.subCount(o);
-      return '<div class="cl-grp"><div class="cl-h"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
-        (iso(o.end) !== ts ? ' · ~' + fmtMD(o.end) : '') + '</span></div>' +
-        L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
+      const c = L.subCount(o), fold = !!(S.clFold || {})[o.key];
+      // 업무 이름 줄을 누르면 세부 업무를 접고 펼쳐요 (접어도 체크한 수는 보여요)
+      return '<div class="cl-grp' + (fold ? ' folded' : '') + '"><button type="button" class="cl-h fold" data-act="clFold" data-key="' + o.key + '" title="' + (fold ? '세부 업무 펼치기' : '세부 업무 접기') + '"><b>' + esc(o.title) + '</b><span>' + c.done + '/' + c.total +
+        (iso(o.end) !== ts ? ' · ~' + fmtMD(o.end) : '') + ' <span class="arr">▶</span></span></button>' +
+        (fold ? '' : L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
           return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
-            '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div>';
+            '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('')) + '</div>';
     }).join('');
     $('#tdTodayT').textContent = '오늘 (' + pad2(t.getMonth() + 1) + '/' + pad2(t.getDate()) + ')';
     const n = addDays(t, 1);
