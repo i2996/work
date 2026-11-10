@@ -805,6 +805,16 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ── TO-DO ── */
 .side-todo{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 8px 8px 14px}
 .side-title{font-weight:700;font-size:14px;margin:0 0 6px;padding-right:6px}
+/* TO-DO 접기 */
+.fold-t{display:flex;align-items:center;gap:6px;width:100%;border:0;background:transparent;padding:2px 6px 2px 0;text-align:left;cursor:pointer;color:var(--text)}
+.fold-t .arr{margin-left:auto;font-size:10px;color:var(--muted);transition:transform .15s;transform:rotate(90deg)}
+.fold-t .cnt{display:none;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:#e6e4f0;color:var(--muted);font-size:11px;font-weight:700;align-items:center;justify-content:center}
+.side-todo.folded .fold-t .arr{transform:rotate(0deg)}
+.side-todo.folded .fold-t .cnt{display:inline-flex}
+.side-todo.folded .fold-t{margin-bottom:0}
+.side-todo.folded .todo-scroll{display:none}
+.side-todo.folded{flex:none}
+.mini-todo.folded{flex:none;min-height:0}
 .todo-scroll{flex:1;min-height:0;overflow-y:auto;padding-right:6px}
 .grp-t{font-size:12px;font-weight:700;color:#7d7b95;margin:12px 0 6px}
 .grp-t:first-child{margin-top:2px}
@@ -2189,6 +2199,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       S.prog['t' + id] = { s: 'doing', at: ts };
       i.value = ''; commit();
     },
+    todoFold() { S.todoFold = Object.assign({}, S.todoFold, { [MODE]: !(S.todoFold || {})[MODE] }); commit(); },
     logSubs() { S.logSubs = S.logSubs === false; commit(); },
     formTab(el) { ui.formTab = el.dataset.v; renderPanel(); },
     stY(el) { S.settle.y = parseInt(el.value, 10); commit(); },
@@ -2559,7 +2570,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   /* ── TO-DO 패널 (메인 / 미니 공용) ── */
   function todoCard() {
-    return '<div class="side-title">3일 업무 TO-DO</div><div class="todo-scroll">' +
+    return '<button type="button" class="side-title fold-t" data-act="todoFold" title="접기 / 펼치기">3일 업무 TO-DO<span class="cnt" id="tdFoldCnt" title="남은 할 일"></span><span class="arr">▶</span></button><div class="todo-scroll">' +
       '<div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div>' +
       '<div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div>' +
       '<div id="clWrap"><div class="grp-t cl">업무 체크리스트</div><div id="tdCl"></div></div>' +
@@ -2589,6 +2600,15 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function renderTodos() {
     const t = today(), ts = iso(t), tm = iso(addDays(t, 1));
     const past = S.todos.filter(x => !x.done && L.todoEnd(x) && iso(L.todoEnd(x)) < ts);   // 기한이 지난 미완료
+    // 접기 상태 (메인창·미니창 따로 기억) + 접혔을 때 보여줄 남은 할 일 수 (지난 미완료 + 오늘 + 내일)
+    const folded = !!(S.todoFold || {})[MODE];
+    document.querySelectorAll('.side-todo').forEach(el => { el.classList.toggle('folded', folded); if (el.parentElement.classList.contains('mini-todo')) el.parentElement.classList.toggle('folded', folded); });
+    const fc = $('#tdFoldCnt');
+    if (fc) {
+      const open = past.length + S.todos.filter(x => !x.done && (L.todoOn(x, t) || L.todoOn(x, addDays(t, 1))) && !past.includes(x)).length +
+        L.rtodoRange(t, addDays(t, 1), true).filter(o => !o.done).length;
+      fc.textContent = open;
+    }
     const fill = (id, items, late, rts) => {
       const el = $('#' + id); if (!el) return;
       rts = rts || [];
