@@ -997,6 +997,13 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mt-row.soon .t{color:#7d6410}
 .mt-row .action{padding:5px 11px;flex:none}
 .mini-todo{flex:1.5 1 0;min-height:90px;padding:0;display:flex;overflow:hidden}
+/* 미니창: 업무 칸과 TO-DO 칸 사이 높이 조절 손잡이 */
+.mini-split{flex:none;height:12px;margin:-10px 0;position:relative;z-index:2;cursor:row-resize;touch-action:none}
+.mini-split::after{content:'';position:absolute;left:50%;top:50%;width:44px;height:4px;margin:-2px 0 0 -22px;border-radius:4px;background:#d9d7e6;opacity:0;transition:opacity .15s}
+.mini-split:hover::after,.mini-split.drag::after{opacity:1}
+.mini-split.drag::after{background:var(--accent)}
+.mini-split.hidden{display:none}
+body.split-drag,body.split-drag *{cursor:row-resize !important;user-select:none !important}
 .mini-todo .side-todo{padding:10px 6px 8px 12px;width:100%;min-height:0}
 .mini-memo{flex:none;background:#fff8e1;border-color:#f3e6b8}
 .mini-memo .mt{color:#9a8230;margin-bottom:4px}
@@ -2656,6 +2663,39 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     host.innerHTML = h + '</div>';
   }
 
+  /* ── 미니창 높이 조절: 업무 칸 비율(S.miniSplit, 0.15~0.85)을 기억 ── */
+  const SPLIT_DEFAULT = 0.4;
+  function applyMiniSplit(ratio) {
+    const tk = $('.mini-tasks'), td = $('.mini-todo'), sp = $('#miniSplit'); if (!tk || !td || !sp) return;
+    const folded = td.classList.contains('folded');
+    sp.classList.toggle('hidden', folded);
+    const r0 = ratio != null ? ratio : (typeof S.miniSplit === 'number' ? S.miniSplit : SPLIT_DEFAULT);
+    tk.style.flex = folded ? '' : r0 + ' 1 0';
+    td.style.flex = folded ? '' : (1 - r0) + ' 1 0';
+  }
+  function initMiniSplit() {
+    const sp = $('#miniSplit'); if (!sp) return;
+    let drag = null;
+    sp.addEventListener('pointerdown', e => {
+      const tk = $('.mini-tasks'), td = $('.mini-todo'); if (!tk || !td) return;
+      const a = tk.getBoundingClientRect(), b = td.getBoundingClientRect();
+      drag = { top: a.top, total: a.height + b.height, r: null };
+      sp.setPointerCapture(e.pointerId); sp.classList.add('drag'); document.body.classList.add('split-drag'); e.preventDefault();
+    });
+    sp.addEventListener('pointermove', e => {
+      if (!drag) return;
+      drag.r = Math.min(0.85, Math.max(0.15, (e.clientY - drag.top) / drag.total));
+      applyMiniSplit(drag.r);
+    });
+    const end = () => {
+      if (!drag) return;
+      if (drag.r != null) { S.miniSplit = Math.round(drag.r * 1000) / 1000; persist(); }
+      drag = null; sp.classList.remove('drag'); document.body.classList.remove('split-drag');
+    };
+    sp.addEventListener('pointerup', end); sp.addEventListener('pointercancel', end);
+    sp.addEventListener('dblclick', () => { delete S.miniSplit; persist(); applyMiniSplit(); });
+  }
+
   /* ── TO-DO 패널 (메인 / 미니 공용) ── */
   function todoCard() {
     return '<button type="button" class="side-title fold-t" data-act="todoFold" title="접기 / 펼치기">TO-DO<span class="cnt" id="tdFoldCnt" title="남은 할 일"></span><span class="arr">▶</span></button><div class="todo-scroll">' +
@@ -2689,6 +2729,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     // 접기 상태 (메인창·미니창 따로 기억) + 접혔을 때 보여줄 남은 할 일 수 (지난 미완료 + 오늘부터 일주일)
     const folded = !!(S.todoFold || {})[MODE];
     document.querySelectorAll('.side-todo').forEach(el => { el.classList.toggle('folded', folded); if (el.parentElement.classList.contains('mini-todo')) el.parentElement.classList.toggle('folded', folded); });
+    applyMiniSplit();
     const fc = $('#tdFoldCnt');
     if (fc) {
       const last = iso(addDays(t, 6));
@@ -3620,9 +3661,11 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         '<section class="mini-card mini-tasks"><div class="mt">업무</div>' +
         '<div class="mt-add"><input id="miniTaskIn" placeholder="새 업무 입력 후 Enter"><button class="btn primary" data-act="miniTaskAdd">＋ 추가</button></div>' +
         '<div class="body" id="miniTasks"></div></section>' +
+        '<div class="mini-split" id="miniSplit" title="끌어서 업무 / TO-DO 높이 조절 · 두 번 누르면 처음대로"></div>' +
         '<section class="mini-card mini-todo"><div class="side-todo">' + todoCard() + '</div></section>' +
         '<section class="mini-card mini-memo"><div class="mt">업무 참고 메모</div><textarea id="memo" spellcheck="false" placeholder="자주 보는 내용이나 기억할 것"></textarea></section></div>';
     }
+    initMiniSplit();
     const mi = document.getElementById('miniTaskIn');
     if (mi) mi.addEventListener('keydown', e => { if (e.key === 'Enter') acts.miniTaskAdd(); });
     ['tdTodayIn'].forEach(id => {
