@@ -2,8 +2,8 @@
 """
 WORK SPACE - 개인 업무 관리 프로그램 (Python + pywebview, 서버 불필요)
 
-- 메인창 : 업무 참고 메모 / 미니 달력 / 3일 TO-DO / 진행 / 전체 조회 / 업무 달력 / 통계
-- 미니창 : 현황 / 처리할 업무 / 3일 TO-DO (항상 위 고정 가능)
+- 메인창 : 업무 참고 메모 / 미니 달력 / TO-DO / 요약 / 전체 조회 / 업무 달력 / 통계
+- 미니창 : 현황 / 처리할 업무 / TO-DO (항상 위 고정 가능)
 - 데이터 : exe(또는 .py)와 같은 폴더의 workspace_data.json 에 자동 저장
 - 자동 실행 : 설정에서 Windows 시작 시 자동 실행 ON/OFF (현재 사용자 시작프로그램 등록)
 - 양식 : 엑셀 양식 등록·복사(openpyxl, 엑셀 실행 불필요), 안내문 양식 + 정산 대상 기간·마감 기한 자동 계산
@@ -819,6 +819,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .grp-t{font-size:12px;font-weight:700;color:#7d7b95;margin:12px 0 6px}
 .grp-t:first-child{margin-top:2px}
 .grp-t.late{color:var(--pink-ink)}
+#tdList .grp-t:first-child{margin-top:10px}
 .quick{display:flex;gap:6px;margin-bottom:4px}
 .quick input{flex:1;min-width:0;padding:8px 10px;font-size:13px}
 .quick button{width:34px;background:var(--accent-soft);border-color:#d3dcf6;color:var(--accent-ink);font-weight:700}
@@ -2586,8 +2587,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     /* TO-DO */
     addTodo(el) {
-      const k = el.dataset.k, inp = $(k === 'today' ? '#tdTodayIn' : '#tdTomIn'), v = inp.value.trim(); if (!v) return;
-      const d = addDays(today(), k === 'today' ? 0 : 1);
+      const inp = $('#tdTodayIn'), v = inp.value.trim(); if (!v) return;   // 입력칸은 오늘 할 일 (다른 날은 업무 달력에서)
+      const d = today();
       S.todos.push({ id: S.next_id++, text: v, date: iso(d), done: false }); inp.value = ''; commit();
     },
     dayAdd(el) {
@@ -2657,10 +2658,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
 
   /* ── TO-DO 패널 (메인 / 미니 공용) ── */
   function todoCard() {
-    return '<button type="button" class="side-title fold-t" data-act="todoFold" title="접기 / 펼치기">3일 업무 TO-DO<span class="cnt" id="tdFoldCnt" title="남은 할 일"></span><span class="arr">▶</span></button><div class="todo-scroll">' +
-      '<div id="tdPastWrap"><div class="grp-t late">지난 미완료</div><div id="tdPast"></div></div>' +
-      '<div class="grp-t" id="tdTodayT"></div><div class="quick"><input id="tdTodayIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="today">＋</button></div><div id="tdToday"></div>' +
-      '<div class="grp-t" id="tdTomT"></div><div class="quick"><input id="tdTomIn" placeholder="할 일 입력 후 Enter"><button data-act="addTodo" data-k="tomorrow">＋</button></div><div id="tdTom"></div></div>';
+    return '<button type="button" class="side-title fold-t" data-act="todoFold" title="접기 / 펼치기">TO-DO<span class="cnt" id="tdFoldCnt" title="남은 할 일"></span><span class="arr">▶</span></button><div class="todo-scroll">' +
+      '<div class="quick"><input id="tdTodayIn" placeholder="오늘 할 일 입력 후 Enter" title="다른 날은 업무 달력에서 날짜를 눌러 추가해요"><button data-act="addTodo" data-k="today">＋</button></div>' +
+      '<div id="tdList"></div></div>';
   }
   const PENCIL = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
   function saveTodoEdit(input, cancel) {
@@ -2686,28 +2686,42 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   function renderTodos() {
     const t = today(), ts = iso(t), tm = iso(addDays(t, 1));
     const past = S.todos.filter(x => !x.done && L.todoEnd(x) && iso(L.todoEnd(x)) < ts);   // 기한이 지난 미완료
-    // 접기 상태 (메인창·미니창 따로 기억) + 접혔을 때 보여줄 남은 할 일 수 (지난 미완료 + 오늘 + 내일)
+    // 접기 상태 (메인창·미니창 따로 기억) + 접혔을 때 보여줄 남은 할 일 수 (지난 미완료 + 오늘부터 일주일)
     const folded = !!(S.todoFold || {})[MODE];
     document.querySelectorAll('.side-todo').forEach(el => { el.classList.toggle('folded', folded); if (el.parentElement.classList.contains('mini-todo')) el.parentElement.classList.toggle('folded', folded); });
     const fc = $('#tdFoldCnt');
     if (fc) {
-      const open = past.length + S.todos.filter(x => !x.done && (L.todoOn(x, t) || L.todoOn(x, addDays(t, 1))) && !past.includes(x)).length +
-        L.rtodoRange(t, addDays(t, 1), true).filter(o => !o.done).length;
+      const last = iso(addDays(t, 6));
+      const open = past.length + S.todos.filter(x => !x.done && !past.includes(x) && x.date && x.date <= last && !(L.todoEnd(x) && iso(L.todoEnd(x)) < ts)).length +
+        new Set(L.rtodoRange(t, addDays(t, 6), true).filter(o => !o.done).map(o => o.key)).size;
       fc.textContent = open;
     }
-    const fill = (id, items, late, rts) => {
-      const el = $('#' + id); if (!el) return;
-      rts = rts || [];
-      const html = items.sort((a, b) => (a.done - b.done) || (a.id - b.id)).map(x => todoRow(x, late)).join('') + rts.map(rtRow).join('');
-      el.innerHTML = html || (late ? '' : '<div class="tempty">없음</div>');
-    };
-    fill('tdPast', past, true);
-    fill('tdToday', S.todos.filter(x => L.todoOn(x, t)), false, L.rtodoRange(t, t, true));
-    fill('tdTom', S.todos.filter(x => L.todoOn(x, addDays(t, 1))), false, L.rtodoRange(addDays(t, 1), addDays(t, 1), true));
-    $('#tdPastWrap').classList.toggle('hidden', !past.length);
-    $('#tdTodayT').textContent = '오늘 (' + pad2(t.getMonth() + 1) + '/' + pad2(t.getDate()) + ')';
-    const n = addDays(t, 1);
-    $('#tdTomT').textContent = '내일 (' + pad2(n.getMonth() + 1) + '/' + pad2(n.getDate()) + ')';
+    // 날짜별로: 지난 미완료 → 오늘(항상) → 일주일 안에 할 일이 있는 날
+    const DAYS = 7, groups = new Map();
+    for (let i = 0; i < DAYS; i++) groups.set(iso(addDays(t, i)), { todos: [], rts: [] });
+    const at = (from) => { const k = from < ts ? ts : from; return groups.get(k); };   // 여러 날에 걸친 할 일은 한 번만 (보이는 첫날에)
+    for (const x of S.todos) {
+      if (past.includes(x)) continue;
+      const end = L.todoEnd(x), s0 = x.date || '';
+      if (!s0 || (end && iso(end) < ts)) continue;
+      const g = at(s0); if (g) g.todos.push(x);
+    }
+    const seen = new Set();
+    for (const o of L.rtodoRange(t, addDays(t, DAYS - 1), true)) {
+      if (seen.has(o.key)) continue; seen.add(o.key);
+      const g = at(iso(o.start)); if (g) g.rts.push(o);
+    }
+    let h = '';
+    if (past.length) h += '<div class="grp-t late">지난 미완료</div>' + past.sort((a, b) => a.id - b.id).map(x => todoRow(x, true)).join('');
+    let i = 0;
+    for (const [k, g] of groups) {
+      const d = P(k), lab = i === 0 ? '오늘' : i === 1 ? '내일' : '';
+      const title = lab ? lab + ' (' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) + ')' : pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) + ' (' + WD[d.getDay()] + ')';
+      const rows = g.todos.sort((a, b) => (a.done - b.done) || (a.id - b.id)).map(x => todoRow(x, false)).join('') + g.rts.map(rtRow).join('');
+      if (i === 0 || rows) h += '<div class="grp-t">' + title + '</div>' + (rows || '<div class="tempty">없음</div>');
+      i++;
+    }
+    const host = $('#tdList'); if (host) host.innerHTML = h;
   }
   const pad2 = n => String(n).padStart(2, '0');
 
@@ -3611,7 +3625,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     }
     const mi = document.getElementById('miniTaskIn');
     if (mi) mi.addEventListener('keydown', e => { if (e.key === 'Enter') acts.miniTaskAdd(); });
-    ['tdTodayIn', 'tdTomIn'].forEach(id => {
+    ['tdTodayIn'].forEach(id => {
       const i = document.getElementById(id);
       if (i) i.addEventListener('keydown', e => { if (e.key === 'Enter') acts.addTodo({ dataset: { k: id === 'tdTodayIn' ? 'today' : 'tomorrow' } }); });
     });
