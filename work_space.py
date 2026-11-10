@@ -2075,6 +2075,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (t.logSubs === undefined) t.logSubs = true;
     if (t.holiday !== 'next') t.holiday = 'prev';
     const TYPES = [['once', '이번만'], ['monthly', '매월 N일'], ['eom', '월말 기준'], ['period', '매월 기간']];
+    // 반복 업무에 이번 달 메모만 있으면 그걸 불러와서 '이번 달만'에 체크된 채로 보여 줌
+    const memoSrc = !isNew && t.type !== 'once' && !String(t.memo || '').trim() && occMemo(thisMonthKey(t.id)).trim() ? 'occ' : 'common';
+    const memoState = { text: null, occ: false };
     const M = openModal(() => '<h3 id="fHead"></h3><div class="form">' +
       (isNew ? '<label>종류</label><div class="seg" id="fKind"></div>' : '') +
       '<label id="fTitleLb"></label><input id="fTitle" value="' + esc(t.title) + '">' +
@@ -2083,7 +2086,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div id="fTaskOnly" class="form"><label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
-      '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>' +
+      '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(memoSrc === 'occ' ? occMemo(thisMonthKey(t.id)) : (t.memo || '')) + '</textarea>' +
+      '<label class="chkline" id="fMemoOccRow"><input id="fMemoOcc" type="checkbox"' + (memoSrc === 'occ' ? ' checked' : '') + '>이번 달(' + (today().getMonth() + 1) + '월)만 (체크하지 않으면 모든 달에 보여요)</label>' +
       '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
       '<div class="err" id="fErr"></div><div class="modal-actions">' +
       (!isNew && kind === 'todo' && !plain ? '<button class="btn danger" data-act="fDelRT" style="margin-right:auto">삭제</button>'
@@ -2094,7 +2098,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (g('fTitle')) t.title = g('fTitle').value.trim();
       if (g('fTime')) t.time = g('fTime').value;
       if (g('fLogSubs')) t.logSubs = g('fLogSubs').checked;
-      if (g('fMemo')) { const mv = g('fMemo').value; if (mv.trim()) t.memo = mv.replace(/\s+$/, ''); else delete t.memo; }
+      if (g('fMemo')) { memoState.text = g('fMemo').value; memoState.occ = !!(g('fMemoOcc') && g('fMemoOcc').checked && t.type !== 'once'); }
       M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) {
         t.start = g('fStart').value;
@@ -2111,6 +2115,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       g('fTitleLb').textContent = todo ? '할 일 내용' : ev ? '일정 이름' : '업무명';
       g('fTitle').placeholder = todo ? '예: 거래처 전화하기' : ev ? '예: 팀 회의' : '예: 월말 자료 정리';
       g('fTaskOnly').classList.toggle('hidden', todo || ev);
+      if (g('fMemoOccRow')) g('fMemoOccRow').classList.toggle('hidden', t.type === 'once');
       g('fTimeRow').classList.toggle('hidden', todo);
       if (g('fKind')) g('fKind').innerHTML = [['task', '업무'], ['todo', '할 일'], ['event', '일정']].map(([v, n]) => '<button type="button" class="' + (kind === v ? 'on' : '') + '" data-act="fKind" data-v="' + v + '">' + n + '</button>').join('');
       const types = plain ? [TYPES[0]] : ev ? TYPES.filter(x => x[0] === 'once' || x[0] === 'monthly') : (todo && !isNew) ? TYPES.filter(x => x[0] !== 'once') : TYPES;
@@ -2153,7 +2158,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       g('fSubs').innerHTML = t.subs.map((x, i) => '<div class="subrow"><input class="sub-in" data-i="' + i + '" value="' + esc(x.text) + '" placeholder="세부 업무 내용">' +
         '<button type="button" class="x" data-act="subDel" data-i="' + i + '" title="삭제">✕</button></div>').join('');
     };
-    form = { t, isNew, read, paint, paintSubs, g, el: M.el, getKind: () => kind, setKind: v => { kind = v; }, plain };
+    form = { t, isNew, read, paint, paintSubs, g, el: M.el, getKind: () => kind, setKind: v => { kind = v; }, plain,
+      saveMemo: task => { if (memoState.text != null) applyMemo(task, thisMonthKey(task.id), memoState.text, memoState.occ, memoSrc); } };
     paint(); paintSubs();
     setTimeout(() => { const i = g('fTitle'); if (i) i.focus(); }, 0);
   }
@@ -2208,21 +2214,36 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const first = (om || cm).split('\n')[0].slice(0, 60);
     return '<span class="memo-ic" role="button" data-act="memo" data-id="' + t.id + '" data-key="' + key + '" title="참고 메모' + (om ? ' (' + occLabel(key) + '만)' : '') + ': ' + esc(first) + '">' + MEMO_SVG + '</span>';
   }
+  /* 메모 하나 + '이번 달만' 체크: 체크하면 그 달 메모로, 아니면 모든 달 공통 메모로 저장 (src: 원래 어디 메모를 고치던 중인지) */
+  const thisMonthKey = id => { const t = today(); return 't' + id + '@' + t.getFullYear() + '-' + pad2(t.getMonth() + 1); };
+  function applyMemo(t, key, text, toOcc, src) {
+    const v = String(text || '').replace(/\s+$/, '');
+    S.occMemo = S.occMemo || {};
+    if (toOcc && key) {
+      if (v.trim()) S.occMemo[key] = v; else delete S.occMemo[key];
+      if (src === 'common') delete t.memo;   // 공통 메모를 이번 달만으로 옮김
+    } else {
+      if (v.trim()) t.memo = v; else delete t.memo;
+      if (src === 'occ' && key) delete S.occMemo[key];   // 이번 달 메모를 모든 달로 옮김
+    }
+  }
   function openMemo(id, key, editing) {
     const t = S.tasks.find(x => x.id === id); if (!t) return;
     const rep = t.type !== 'once', om = occMemo(key), ml = occLabel(key);
-    const da = ' data-id="' + id + '" data-key="' + (key || '') + '"';
+    const src = rep && key && om.trim() ? 'occ' : 'common';   // 이번 달 메모가 있으면 그걸 고치고, 없으면 공통 메모
+    const da = ' data-id="' + id + '" data-key="' + (key || '') + '" data-src="' + src + '"';
     const M = openModal(() => '<h3>' + esc(t.title) + ' <span style="font-size:12px;font-weight:600;color:var(--muted);margin-left:4px">참고 메모</span></h3>' +
       (editing
-        ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<textarea id="memoEd" class="memo-edit"' + (rep && key ? ' style="min-height:130px"' : '') + ' spellcheck="false" placeholder="이 업무를 할 때 참고할 내용을 적어 두세요 (경로, 담당자, 주의할 점 등)">' + esc(t.memo || '') + '</textarea>' +
-          (rep && key ? '<div class="memo-lab">' + ml + '만 (다른 달에는 안 보여요)</div><textarea id="memoOcc" class="memo-edit" style="min-height:100px" spellcheck="false" placeholder="이번 달에만 필요한 내용 (예: 이번 달은 ○○ 확인)">' + esc(om) + '</textarea>' : '')
+        ? '<textarea id="memoEd" class="memo-edit" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용을 적어 두세요 (경로, 담당자, 주의할 점 등)">' + esc(src === 'occ' ? om : (t.memo || '')) + '</textarea>' +
+          (rep && key ? '<label class="chkline"><input id="memoOccChk" type="checkbox"' + (src === 'occ' ? ' checked' : '') + '>' + ml + '만 (체크하지 않으면 모든 달에 보여요)</label>' +
+            (om.trim() && String(t.memo || '').trim() ? '<p class="hint2" style="margin:4px 0 0">' + (src === 'occ' ? '모든 달 공통 메모도 따로 있어요. 체크를 풀고 저장하면 공통 메모가 이 내용으로 바뀌어요.' : '') + '</p>' : '') : '')
         : (om.trim() ? '<div class="memo-lab">' + ml + '만</div><div class="memo-view occ">' + esc(om) + '</div>' : '') +
           (String(t.memo || '').trim() ? (rep ? '<div class="memo-lab">모든 달 공통</div>' : '') + '<div class="memo-view">' + esc(t.memo) + '</div>' : '')) +
       '<div class="modal-actions">' + (editing
         ? '<button class="btn" data-act="memoCancel"' + da + '>취소</button><button class="btn primary" data-act="memoSave"' + da + '>저장</button>'
         : '<button class="btn" data-act="memoCopy"' + da + '>복사</button><button class="btn" data-act="memoEdit"' + da + '>수정</button><button class="btn primary" data-act="mClose">닫기</button>') + '</div>');
     M.el.style.width = 'min(560px,100%)';
-    if (editing) setTimeout(() => { const ta = M.el.querySelector(om ? '#memoOcc' : '#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
+    if (editing) setTimeout(() => { const ta = M.el.querySelector('#memoEd'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
   }
 
   /* ── 상태 버튼 / 칩 ── */
@@ -2428,9 +2449,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     memoCancel(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)), k = el.dataset.key || ''; if (t && (t.memo || occMemo(k))) openMemo(t.id, k, false); else closeModal(); },
     memoSave(el) {
       const t = S.tasks.find(x => x.id === Number(el.dataset.id)); if (!t) return;
-      const k = el.dataset.key || '', v = ($('#memoEd') || {}).value || '', ov = $('#memoOcc');
-      if (v.trim()) t.memo = v.replace(/\s+$/, ''); else delete t.memo;
-      if (ov && k) { S.occMemo = S.occMemo || {}; if (ov.value.trim()) S.occMemo[k] = ov.value.replace(/\s+$/, ''); else delete S.occMemo[k]; }
+      const k = el.dataset.key || '', v = ($('#memoEd') || {}).value || '', chk = $('#memoOccChk');
+      applyMemo(t, k, v, !!(chk && chk.checked), el.dataset.src || 'common');
       commit(); if (t.memo || occMemo(k)) openMemo(t.id, k, false); else closeModal();
     },
     memoCopy(el) {
@@ -2590,6 +2610,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       t.subs = (t.subs || []).filter(x => x.text.trim()).map(x => ({ id: x.id, text: x.text.trim() }));
       if (isNew) { t.id = S.next_id++; S.tasks.push(t); }
       else { const i = S.tasks.findIndex(x => x.id === t.id); if (i >= 0) S.tasks[i] = t; }
+      form.saveMemo(t);
       closeModal(); commit();
     },
     /* TO-DO */
