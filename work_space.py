@@ -942,6 +942,12 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* 팝업 닫기: 오른쪽 위 ✕ */
 .modal-x{position:absolute;top:14px;right:14px;width:32px;height:32px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:20px;line-height:1;display:grid;place-items:center;z-index:1}
 .modal-x:hover{background:#f1f0f8;color:var(--text)}
+/* 팝업 스크롤바: 얇고 둥글게, 위아래 모서리를 비워서 오른쪽 모서리도 둥글게 보이게 */
+.modal::-webkit-scrollbar{width:10px}
+.modal::-webkit-scrollbar-track{background:transparent;margin:18px 0}
+.modal::-webkit-scrollbar-thumb{background:#d9d7e6;border-radius:10px;border:3px solid #fff}
+.modal::-webkit-scrollbar-thumb:hover{background:#c3c0d6}
+.modal::-webkit-scrollbar-corner{background:transparent}
 .modal-actions:empty{display:none}
 .modal h3 .hol{font-size:12px;font-weight:600;color:#d77f9f;margin-left:6px}
 .form{display:grid;gap:8px}
