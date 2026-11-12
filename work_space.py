@@ -2999,7 +2999,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
      both 는 같은 날 같은 세부 업무를 체크한 업무끼리 'a, b: 세부1, 세부2' 한 줄로 합쳐요 */
   const logModeOf = task => (S.logSubs === false ? 'title' : task.logMode || (task.logSubs === false ? 'title' : 'subs'));
   /* 같은 날 체크한 세부 업무 중 앞 단어가 같은 것끼리 묶고, 반복되는 앞 단어는 한 번만
-     예) ['단기 파일작성', '단기 신고', '월보수액 신고'] → '단기 파일작성 신고, 월보수액 신고' */
+     예) ['단기 파일작성', '단기 신고', '월보수액 신고'] → '단기 파일작성 신고, 월보수액 신고'
+     앞 단어로 묶이지 않은 항목은 뒤 단어가 같으면 합침: ['월보수액 신고', '단기 신고'] → '월보수액 단기 신고' */
   function compactSubs(list) {
     const groups = [];
     for (const raw of list) {
@@ -3007,14 +3008,24 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const g = groups.find(x => x.items[0][0] === w[0]);
       if (g) g.items.push(w); else groups.push({ items: [w] });
     }
-    return groups.map(({ items }) => {
-      if (items.length === 1) return items[0].join(' ');
+    const out = groups.map(({ items }) => {
+      if (items.length === 1) return { single: items[0] };
       let n = 0;   // 모두 같은 앞 단어 수 (각 항목에 뒤 단어가 하나는 남게)
       while (items.every(w => w.length > n + 1 && w[n] === items[0][n])) n++;
       n = Math.max(n, 1);
       const rest = items.map(w => w.slice(n).join(' ')).filter(Boolean);
-      return items[0].slice(0, n).join(' ') + (rest.length ? ' ' + rest.join(' ') : '');
-    }).join(', ');
+      return { text: items[0].slice(0, n).join(' ') + (rest.length ? ' ' + rest.join(' ') : '') };
+    });
+    // 앞 단어로 묶이지 않은 항목끼리 뒤 단어가 같으면 앞부분을 이어 씀: 월보수액 신고 + 단기 신고 → 월보수액 단기 신고
+    const res = [];
+    for (const x of out) {
+      if (x.text != null) { res.push(x); continue; }
+      const w = x.single, last = w[w.length - 1];
+      const g = w.length > 1 && res.find(y => y.tail === last);
+      if (g) g.heads.push(w.slice(0, -1).join(' '));
+      else res.push(w.length > 1 ? { tail: last, heads: [w.slice(0, -1).join(' ')] } : { text: w.join(' ') });
+    }
+    return res.map(x => (x.text != null ? x.text : x.heads.join(' ') + ' ' + x.tail)).join(', ');
   }
   function logText(ds) {
     const tdy = iso(today());
