@@ -2998,6 +2998,24 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
      업무마다 담는 방식(logMode): title 업무명만 / subs 세부 업무만 / both 업무명 + 세부 업무
      both 는 같은 날 같은 세부 업무를 체크한 업무끼리 'a, b: 세부1, 세부2' 한 줄로 합쳐요 */
   const logModeOf = task => (S.logSubs === false ? 'title' : task.logMode || (task.logSubs === false ? 'title' : 'subs'));
+  /* 같은 날 체크한 세부 업무 중 앞 단어가 같은 것끼리 묶고, 반복되는 앞 단어는 한 번만
+     예) ['단기 파일작성', '단기 신고', '월보수액 신고'] → '단기 파일작성 신고, 월보수액 신고' */
+  function compactSubs(list) {
+    const groups = [];
+    for (const raw of list) {
+      const w = String(raw).trim().split(/\s+/).filter(Boolean); if (!w.length) continue;
+      const g = groups.find(x => x.items[0][0] === w[0]);
+      if (g) g.items.push(w); else groups.push({ items: [w] });
+    }
+    return groups.map(({ items }) => {
+      if (items.length === 1) return items[0].join(' ');
+      let n = 0;   // 모두 같은 앞 단어 수 (각 항목에 뒤 단어가 하나는 남게)
+      while (items.every(w => w.length > n + 1 && w[n] === items[0][n])) n++;
+      n = Math.max(n, 1);
+      const rest = items.map(w => w.slice(n).join(' ')).filter(Boolean);
+      return items[0].slice(0, n).join(' ') + (rest.length ? ' ' + rest.join(' ') : '');
+    }).join(', ');
+  }
   function logText(ds) {
     const tdy = iso(today());
     const keys = new Set(Object.keys(S.prog));
@@ -3012,7 +3030,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         // 세부 업무를 담는 업무: 체크한 날 바로 ('일지'를 끈 항목은 빼요)
         const checked = subs.filter(sb => L.subDone(k, sb.id));
         const picked = checked.filter(sb => !sb.nolog && L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);
-        if (picked.length) items.push(mode === 'both' ? { o, title: o.title, subs: picked.join(', ') } : { o, line: picked.join(', ') });
+        if (picked.length) { const joined = compactSubs(picked); items.push(mode === 'both' ? { o, title: o.title, subs: joined } : { o, line: joined }); }
         else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
         continue;
       }
