@@ -1049,6 +1049,13 @@ body.split-drag,body.split-drag *{cursor:row-resize !important;user-select:none 
 .subrow{display:flex;gap:6px;margin-bottom:2px}
 .subrow input{flex:1}
 .subrow .x{width:36px;color:#b9b7c9}
+/* 세부 업무마다 근무일지에 담을지 */
+.subrow .lg{flex:none;padding:0 10px;font-size:12px;font-weight:700;border-radius:10px;background:var(--mint);border-color:#c5e3d3;color:var(--mint-ink);white-space:nowrap}
+.subrow .lg.off{background:#f4f3f8;border-color:var(--line);color:var(--faint);text-decoration:line-through}
+.tr .nolog{flex:none;font-size:10px;font-weight:700;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:4px}
+/* 근무일지 직접 고치기 */
+.logbox.edited{background:#fffdf3;border-color:#efdf9e}
+.log-edit-bar{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#8a7424}
 .addsub{justify-self:start;font-size:12px;padding:6px 12px}
 
 /* 통계: 정기/일반 */
@@ -1927,7 +1934,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!ui.subOpen.has(o.key) || !L.subsOf(o).length) return '';
     return '<div class="' + cls + '"><div class="subs-box">' + L.subsOf(o).map(sb => { const d = L.subDone(o.key, sb.id);
       return '<div class="tr ' + (d ? 'done' : '') + '"><button class="chk ' + (d ? 'on' : '') + '" data-act="subToggle" data-key="' + o.key + '" data-sid="' + sb.id + '">' + (d ? '✓' : '') + '</button>' +
-        '<span class="tx">' + esc(sb.text) + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div></div>';
+        '<span class="tx">' + esc(sb.text) + (sb.nolog ? '<span class="nolog" title="근무일지에 담지 않는 항목">일지 제외</span>' : '') + '</span><button class="x pen" data-act="editTask" data-id="' + o.id + '" title="업무에서 수정">' + PENCIL + '</button></div>'; }).join('') + '</div></div>';
   }
   const ppBtn = o => (L.canPostpone(o) ? '<button class="action later" data-act="postpone" data-key="' + o.key + '" title="마감을 뒤로 미뤄요">미루기</button>' : '');
   const periodText = o => (iso(o.start) === iso(o.end) ? fmtMD(o.end) : fmtMD(o.start) + ' ~ ' + fmtMD(o.end));
@@ -2096,7 +2103,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div id="fTimeRow" class="form"><label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '"></div>' +
       '<div id="fTaskOnly" class="form"><label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
-      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기</label>' +
+      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기 (항목 옆 \'일지\'를 끄면 그 항목은 빼요)</label>' +
       '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(memoSrc === 'occ' ? occMemo(thisMonthKey(t.id)) : (t.memo || '')) + '</textarea>' +
       '<label class="chkline" id="fMemoOccRow"><input id="fMemoOcc" type="checkbox"' + (memoSrc === 'occ' ? ' checked' : '') + '>이번 달(' + (today().getMonth() + 1) + '월)만 (체크하지 않으면 모든 달에 보여요)</label>' +
       '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
@@ -2167,6 +2174,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     };
     const paintSubs = () => {
       g('fSubs').innerHTML = t.subs.map((x, i) => '<div class="subrow"><input class="sub-in" data-i="' + i + '" value="' + esc(x.text) + '" placeholder="세부 업무 내용">' +
+        '<button type="button" class="btn lg' + (x.nolog ? ' off' : '') + '" data-act="subLog" data-i="' + i + '" title="' + (x.nolog ? '근무일지에 담지 않아요 (누르면 담기)' : '체크하면 근무일지에 담겨요 (누르면 빼기)') + '">일지</button>' +
         '<button type="button" class="x" data-act="subDel" data-i="' + i + '" title="삭제">✕</button></div>').join('');
     };
     form = { t, isNew, read, paint, paintSubs, g, el: M.el, getKind: () => kind, setKind: v => { kind = v; }, plain,
@@ -2301,6 +2309,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       form.read(); form.t.subs = form.t.subs || []; form.t.subs.push({ id: S.next_id++, text: '' }); form.paintSubs();
       const ins = form.el.querySelectorAll('.sub-in'); if (ins.length) ins[ins.length - 1].focus();
     },
+    subLog(el) { form.read(); const x = form.t.subs[Number(el.dataset.i)]; if (x) { if (x.nolog) delete x.nolog; else x.nolog = true; } form.paintSubs(); },
     subDel(el) { form.read(); form.t.subs.splice(Number(el.dataset.i), 1); form.paintSubs(); },
     statKind(el) { ui.statKind = el.dataset.v; renderPanel(); },
     miniTaskAdd() {
@@ -2445,6 +2454,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     logPrev() { ui.logDate = iso(addDays(P(ui.logDate || iso(today())), -1)); renderPanel(); focusLog(); },
     logNext() { const n = iso(addDays(P(ui.logDate || iso(today())), 1)); ui.logDate = n >= iso(today()) ? '' : n; renderPanel(); focusLog(); },
     logToday() { ui.logDate = ''; renderPanel(); focusLog(); },
+    // 근무일지 직접 고치기: 그 날짜에만 저장, 자동 내용과 똑같아지면 고친 기록을 지움
+    logEdit(el) {
+      const ds = el.dataset.ds; S.logEdit = S.logEdit || {};
+      if (el.value === logText(ds).text) delete S.logEdit[ds]; else S.logEdit[ds] = el.value;
+      el.classList.toggle('edited', ds in S.logEdit); persist();
+    },
+    logEditDone() { renderPanel(); },
+    logReset(el) { if (S.logEdit) delete S.logEdit[el.dataset.ds]; commit(); },
     logCopy(el) {
       const ta = $('#logText'); if (!ta) return;
       const ok = () => { el.textContent = '복사됨 ✓'; setTimeout(() => { if (el.isConnected) el.textContent = '복사'; }, 1500); };
@@ -2617,7 +2634,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if ((t.type === 'monthly' || t.type === 'period') && !(t.a >= 1 && t.a <= 31)) return err('날짜는 1~31 사이로 입력해 주세요.');
       if (t.type === 'period' && !(t.b >= 1 && t.b <= 31)) return err('종료일은 1~31 사이로 입력해 주세요.');
       if (t.type === 'eom' && !(t.a >= 0 && t.a <= 20)) return err('0~20 사이로 입력해 주세요.');
-      t.subs = (t.subs || []).filter(x => x.text.trim()).map(x => ({ id: x.id, text: x.text.trim() }));
+      t.subs = (t.subs || []).filter(x => x.text.trim()).map(x => Object.assign({ id: x.id, text: x.text.trim() }, x.nolog ? { nolog: true } : {}));
       if (isNew) { t.id = S.next_id++; S.tasks.push(t); }
       else { const i = S.tasks.findIndex(x => x.id === t.id); if (i >= 0) S.tasks[i] = t; }
       form.saveMemo(t);
@@ -2984,7 +3001,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (withSubs && o.task.logSubs !== false && subs.length) {
         // 세부 업무를 담는 업무: 체크한 날 바로, 업무명 없이 그날 체크한 세부 업무를 쉼표로
         const checked = subs.filter(sb => L.subDone(k, sb.id));
-        const picked = checked.filter(sb => L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);
+        const picked = checked.filter(sb => !sb.nolog && L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);   // '일지'를 끈 항목은 빼요
         if (picked.length) items.push({ o, line: picked.join(', ') });
         else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
         continue;
@@ -2997,18 +3014,21 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     items.sort((a, b) => L.byEnd(a.o, b.o));
     return { text: items.map(x => x.line).join('\n'), count: items.length };
   }
-  function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) { ta.focus(); ta.select(); } }, 0); }
+  function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) ta.focus(); }, 0); }   // 직접 고칠 수 있어서 전체 선택은 하지 않음 (잘못 눌러 지워지지 않게)
   function viewLog() {
     const ds = ui.logDate || iso(today()), d = P(ds), isToday = ds === iso(today());
-    const r = logText(ds);
+    const r = logText(ds), ed = (S.logEdit || {})[ds];
+    const edited = typeof ed === 'string';
     return '<div class="sec-head"><div><h2>근무일지</h2><div class="sub">' + (isToday ? '오늘' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일') +
-      ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 아래 칸을 클릭하고 Ctrl+A → Ctrl+C<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일, 세부 업무는 체크한 날 바로 들어가요</div></div>' +
+      ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 오른쪽 \'복사\'로 복사해요<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일, 세부 업무는 체크한 날 바로 들어가요</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
       '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
       '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="켜면 세부 업무가 있는 업무는 업무명 대신 체크한 세부 업무가 쉼표로 이어져 담겨요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
       '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
-      '<textarea id="logText" class="logbox" readonly spellcheck="false">' + esc(r.text) + '</textarea>' +
-      (r.count ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
+      '<textarea id="logText" class="logbox' + (edited ? ' edited' : '') + '" spellcheck="false" data-inp="logEdit" data-chg="logEditDone" data-ds="' + ds + '" placeholder="이 날 담긴 업무가 없어요 · 직접 적어도 돼요">' + esc(edited ? ed : r.text) + '</textarea>' +
+      (edited ? '<div class="log-edit-bar">✎ 직접 고친 내용이에요. 이후 체크·완료한 업무는 자동으로 더해지지 않아요.<button class="btn" data-act="logReset" data-ds="' + ds + '">자동 내용으로 되돌리기</button></div>'
+        : '<div class="sub" style="margin-top:8px">칸 안의 내용을 직접 고칠 수 있어요. 고치면 이 날짜에만 저장돼요.</div>') +
+      (r.count || edited ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
   }
 
   /* ───────── 양식 (안내문 양식 · 엑셀 양식) ───────── */
