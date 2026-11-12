@@ -2107,7 +2107,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label>근무일지에 담는 방식 (세부 업무가 있을 때)</label><div class="seg" id="fLogMode">' +
         [['both', '업무명 + 세부 업무'], ['subs', '세부 업무만'], ['title', '업무명만']].map(([v, n]) => '<button type="button" class="' + (t.logMode === v ? 'on' : '') + '" data-act="fLogMode" data-v="' + v + '">' + n + '</button>').join('') + '</div>' +
-      '<div class="hint" style="margin-top:-2px">업무명 + 세부 업무: \'a 회사 고용: 단기 파일작성, 단기 신고\' · 같은 날 같은 세부 업무를 체크한 업무끼리는 \'a 회사 고용, b 회사 고용: …\'처럼 한 줄로 합쳐요.<br>항목 옆 \'일지\'를 끄면 그 항목은 근무일지에서 빼요.</div>' +
+      '<div class="hint" style="margin-top:-2px">업무명 + 세부 업무: \'a 회사 고용 단기 파일 작성 및 신고\' · 같은 날 같은 세부 업무를 체크한 업무끼리는 \'a 회사 및 b 회사 고용 …\'처럼 한 줄로 합쳐요.<br>항목 옆 \'일지\'를 끄면 그 항목은 근무일지에서 빼요.</div>' +
       '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(memoSrc === 'occ' ? occMemo(thisMonthKey(t.id)) : (t.memo || '')) + '</textarea>' +
       '<label class="chkline" id="fMemoOccRow"><input id="fMemoOcc" type="checkbox"' + (memoSrc === 'occ' ? ' checked' : '') + '>이번 달(' + (today().getMonth() + 1) + '월)만 (체크하지 않으면 모든 달에 보여요)</label>' +
       '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
@@ -2999,8 +2999,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
      both 는 같은 날 같은 세부 업무를 체크한 업무끼리 'a, b: 세부1, 세부2' 한 줄로 합쳐요 */
   const logModeOf = task => (S.logSubs === false ? 'title' : task.logMode || (task.logSubs === false ? 'title' : 'subs'));
   /* 같은 날 체크한 세부 업무 중 앞 단어가 같은 것끼리 묶고, 반복되는 앞 단어는 한 번만
-     예) ['단기 파일작성', '단기 신고', '월보수액 신고'] → '단기 파일작성 신고, 월보수액 신고'
-     앞 단어로 묶이지 않은 항목은 뒤 단어가 같으면 합침: ['월보수액 신고', '단기 신고'] → '월보수액 단기 신고' */
+     예) ['단기 파일 작성', '단기 신고'] → '단기 파일 작성 및 신고'
+     앞 단어로 묶이지 않은 항목은 뒤 단어가 같으면 합침: ['월보수액 파일 작성', '단기 파일 작성'] → '월보수액 파일 및 단기 파일 작성' */
   function compactSubs(list) {
     const groups = [];
     for (const raw of list) {
@@ -3014,7 +3014,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       while (items.every(w => w.length > n + 1 && w[n] === items[0][n])) n++;
       n = Math.max(n, 1);
       const rest = items.map(w => w.slice(n).join(' ')).filter(Boolean);
-      return { text: items[0].slice(0, n).join(' ') + (rest.length ? ' ' + rest.join(' ') : '') };
+      return { text: items[0].slice(0, n).join(' ') + (rest.length ? ' ' + andJoin(rest) : '') };
     });
     // 앞 단어로 묶이지 않은 항목끼리 뒤 단어가 같으면 앞부분을 이어 씀: 월보수액 신고 + 단기 신고 → 월보수액 단기 신고
     const res = [];
@@ -3025,8 +3025,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (g) g.heads.push(w.slice(0, -1).join(' '));
       else res.push(w.length > 1 ? { tail: last, heads: [w.slice(0, -1).join(' ')] } : { text: w.join(' ') });
     }
-    return res.map(x => (x.text != null ? x.text : x.heads.join(' ') + ' ' + x.tail)).join(', ');
+    return res.map(x => (x.text != null ? x.text : andJoin(x.heads) + ' ' + x.tail)).join(', ');
   }
+  /* 묶을 때 끊기는 곳에 '및': [A, B] → 'A 및 B', [A, B, C] → 'A, B 및 C' */
+  const andJoin = a => (a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' 및 ' + a[a.length - 1]);
   function logText(ds) {
     const tdy = iso(today());
     const keys = new Set(Object.keys(S.prog));
@@ -3058,7 +3060,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (grp.has(it.subs)) { grp.get(it.subs).titles.push(it.title); continue; }
       const g = { titles: [it.title], subs: it.subs }; grp.set(it.subs, g); lines.push(g);
     }
-    const out = lines.map(x => (typeof x === 'string' ? x : x.titles.join(', ') + ': ' + x.subs));
+    const out = lines.map(x => (typeof x === 'string' ? x : compactSubs(x.titles) + ' ' + x.subs));   // 업무명 바로 뒤에 세부 업무 (업무명끼리도 같은 규칙으로 묶음)
     return { text: out.join('\n'), count: items.length };
   }
   /* 직접 고친 근무일지 + 그 뒤에 바뀐 자동 내용 합치기
