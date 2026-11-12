@@ -2091,6 +2091,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       { id: 0, title: '', type: 'once', a: 25, b: 28, start: preset || '', end: preset || '', time: '', adjust: true, subs: [] };
     t.subs = t.subs || [];
     if (t.logSubs === undefined) t.logSubs = true;
+    // 근무일지 담는 방식: title(업무명만) / subs(세부 업무만) / both(업무명 + 세부 업무). 새 업무는 업무명 + 세부 업무
+    if (!t.logMode) t.logMode = isNew ? 'both' : (t.logSubs === false ? 'title' : 'subs');
     if (t.holiday !== 'next') t.holiday = 'prev';
     const TYPES = [['once', '이번만'], ['monthly', '매월 N일'], ['eom', '월말 기준'], ['period', '매월 기간']];
     // 반복 업무에 이번 달 메모만 있으면 그걸 불러와서 '이번 달만'에 체크된 채로 보여 줌
@@ -2103,7 +2105,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div id="fTimeRow" class="form"><label>시간 (선택)</label><input id="fTime" type="time" value="' + esc(t.time || '') + '"></div>' +
       '<div id="fTaskOnly" class="form"><label>세부 업무 체크리스트 (선택)</label><div id="fSubs"></div>' +
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
-      '<label class="chkline"><input id="fLogSubs" type="checkbox" ' + (t.logSubs !== false ? 'checked' : '') + '>근무일지에 업무명 대신 체크한 세부 업무를 쉼표로 담기 (항목 옆 \'일지\'를 끄면 그 항목은 빼요)</label>' +
+      '<label>근무일지에 담는 방식 (세부 업무가 있을 때)</label><div class="seg" id="fLogMode">' +
+        [['both', '업무명 + 세부 업무'], ['subs', '세부 업무만'], ['title', '업무명만']].map(([v, n]) => '<button type="button" class="' + (t.logMode === v ? 'on' : '') + '" data-act="fLogMode" data-v="' + v + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="hint" style="margin-top:-2px">업무명 + 세부 업무: \'a 회사 고용: 단기 파일작성, 단기 신고\' · 같은 날 같은 세부 업무를 체크한 업무끼리는 \'a 회사 고용, b 회사 고용: …\'처럼 한 줄로 합쳐요.<br>항목 옆 \'일지\'를 끄면 그 항목은 근무일지에서 빼요.</div>' +
       '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(memoSrc === 'occ' ? occMemo(thisMonthKey(t.id)) : (t.memo || '')) + '</textarea>' +
       '<label class="chkline" id="fMemoOccRow"><input id="fMemoOcc" type="checkbox"' + (memoSrc === 'occ' ? ' checked' : '') + '>이번 달(' + (today().getMonth() + 1) + '월)만 (체크하지 않으면 모든 달에 보여요)</label>' +
       '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
@@ -2115,7 +2119,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const read = () => {
       if (g('fTitle')) t.title = g('fTitle').value.trim();
       if (g('fTime')) t.time = g('fTime').value;
-      if (g('fLogSubs')) t.logSubs = g('fLogSubs').checked;
+      t.logSubs = t.logMode !== 'title';
       if (g('fMemo')) { memoState.text = g('fMemo').value; memoState.occ = !!(g('fMemoOcc') && g('fMemoOcc').checked && t.type !== 'once'); }
       M.el.querySelectorAll('.sub-in').forEach(inp => { const x = t.subs[Number(inp.dataset.i)]; if (x) x.text = inp.value; });
       if (g('fStart')) {
@@ -2457,7 +2461,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     // 근무일지 직접 고치기: 그 날짜에만 저장, 자동 내용과 똑같아지면 고친 기록을 지움
     logEdit(el) {
       const ds = el.dataset.ds; S.logEdit = S.logEdit || {};
-      if (el.value === logText(ds).text) delete S.logEdit[ds]; else S.logEdit[ds] = el.value;
+      const auto = logText(ds).text;
+      if (el.value === auto) delete S.logEdit[ds]; else S.logEdit[ds] = { text: el.value, base: auto };   // 고칠 때의 자동 내용도 함께 기억
       el.classList.toggle('edited', ds in S.logEdit); persist();
     },
     logEditDone() { renderPanel(); },
@@ -2548,6 +2553,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       else confirmBox('"' + x.title + '" 일정을 삭제할까요?', '삭제', () => { L.removeEvent(x.id); commit(); openDay(ds); }, () => openDay(ds));
     },
     newTodo(el) { openTask(null, el.dataset.date || '', 'todo'); },
+    fLogMode(el) { form.t.logMode = el.dataset.v; form.el.querySelectorAll('#fLogMode button').forEach(b => b.classList.toggle('on', b.dataset.v === el.dataset.v)); },
     fHol(el) { form.read(); form.t.holiday = el.dataset.v; form.paint(); },
     fKind(el) { form.read(); form.setKind(el.dataset.v); form.paint(); },
     rtEdit(el) { const r = (S.rtodos || []).find(x => String(x.id) === el.dataset.id); if (r) openTask({ id: r.id, title: r.text, type: r.type, a: r.a, b: r.b, holiday: r.holiday, start: '', end: '', time: '', adjust: true, subs: [] }, '', 'todo'); },
@@ -2651,7 +2657,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const date = el.dataset.date || curDayDate(); let due = ($('#dayDue') || {}).value || ''; if (due && due <= date) due = '';
       // 이번만 하는 업무로 등록 (직접 고른 날짜가 휴일이어도 그대로 유지)
       const end = due || date;
-      S.tasks.push({ id: S.next_id++, title: v, type: 'once', a: 25, b: 28, time: '', start: date, end, adjust: !(L.isOff(P(date)) || L.isOff(P(end))), holiday: 'prev', subs: [], logSubs: true });
+      S.tasks.push({ id: S.next_id++, title: v, type: 'once', a: 25, b: 28, time: '', start: date, end, adjust: !(L.isOff(P(date)) || L.isOff(P(end))), holiday: 'prev', subs: [], logSubs: true, logMode: 'both' });
       commit();
     },
     tdToggle(el) { const t = S.todos.find(x => String(x.id) === el.dataset.id); if (t) { t.done = !t.done; commit(); } },
@@ -2988,8 +2994,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
 
   /* 근무일지: 그날 완료 처리한 업무 + 체크한 할 일을 자동으로 모아요 */
+  /* 근무일지: 그날 완료 처리한 업무 + 체크한 세부 업무를 자동으로 모아요
+     업무마다 담는 방식(logMode): title 업무명만 / subs 세부 업무만 / both 업무명 + 세부 업무
+     both 는 같은 날 같은 세부 업무를 체크한 업무끼리 'a, b: 세부1, 세부2' 한 줄로 합쳐요 */
+  const logModeOf = task => (S.logSubs === false ? 'title' : task.logMode || (task.logSubs === false ? 'title' : 'subs'));
   function logText(ds) {
-    const tdy = iso(today()), withSubs = S.logSubs !== false;
+    const tdy = iso(today());
     const keys = new Set(Object.keys(S.prog));
     Object.keys(S.subdone || {}).forEach(k => keys.add(k.slice(0, k.lastIndexOf(':'))));
     const items = [];
@@ -2997,12 +3007,12 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const o = L.occByKey(k); if (!o) continue;
       const p = S.prog[k] || {};
       if (p.sub) continue;   // 대직으로 완료한 업무는 근무일지에 넣지 않아요
-      const subs = L.subsOf(o);
-      if (withSubs && o.task.logSubs !== false && subs.length) {
-        // 세부 업무를 담는 업무: 체크한 날 바로, 업무명 없이 그날 체크한 세부 업무를 쉼표로
+      const subs = L.subsOf(o), mode = logModeOf(o.task);
+      if (mode !== 'title' && subs.length) {
+        // 세부 업무를 담는 업무: 체크한 날 바로 ('일지'를 끈 항목은 빼요)
         const checked = subs.filter(sb => L.subDone(k, sb.id));
-        const picked = checked.filter(sb => !sb.nolog && L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);   // '일지'를 끈 항목은 빼요
-        if (picked.length) items.push({ o, line: picked.join(', ') });
+        const picked = checked.filter(sb => !sb.nolog && L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);
+        if (picked.length) items.push(mode === 'both' ? { o, title: o.title, subs: picked.join(', ') } : { o, line: picked.join(', ') });
         else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
         continue;
       }
@@ -3012,21 +3022,41 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       if (from && ds >= from && ds <= to) items.push({ o, line: o.title });
     }
     items.sort((a, b) => L.byEnd(a.o, b.o));
-    return { text: items.map(x => x.line).join('\n'), count: items.length };
+    // 같은 세부 업무 묶음은 업무명을 이어서 한 줄로
+    const lines = [], grp = new Map();
+    for (const it of items) {
+      if (it.subs == null) { if (!lines.includes(it.line)) lines.push(it.line); continue; }
+      if (grp.has(it.subs)) { grp.get(it.subs).titles.push(it.title); continue; }
+      const g = { titles: [it.title], subs: it.subs }; grp.set(it.subs, g); lines.push(g);
+    }
+    const out = lines.map(x => (typeof x === 'string' ? x : x.titles.join(', ') + ': ' + x.subs));
+    return { text: out.join('\n'), count: items.length };
+  }
+  /* 직접 고친 근무일지 + 그 뒤에 바뀐 자동 내용 합치기
+     ed = { text: 고친 내용, base: 고칠 때의 자동 내용 } → 새로 생긴 줄은 아래에 더하고, 없어진 줄은 빼요 */
+  function mergedLog(ds) {
+    const auto = logText(ds).text, ed = (S.logEdit || {})[ds];
+    if (ed == null) return { text: auto, edited: false };
+    const e = typeof ed === 'string' ? { text: ed, base: auto } : ed;   // 예전 형식(글자만)
+    const split = t => String(t || '').split('\n').filter(x => x.trim());
+    const base = split(e.base), now = split(auto);
+    const removed = new Set(base.filter(x => !now.includes(x))), added = now.filter(x => !base.includes(x));
+    const keep = String(e.text || '').split('\n').filter(x => !removed.has(x));
+    added.forEach(x => { if (!keep.includes(x)) keep.push(x); });
+    return { text: keep.join('\n').replace(/^\n+|\n+$/g, ''), edited: true, added: added.length };
   }
   function focusLog() { setTimeout(() => { const ta = $('#logText'); if (ta) ta.focus(); }, 0); }   // 직접 고칠 수 있어서 전체 선택은 하지 않음 (잘못 눌러 지워지지 않게)
   function viewLog() {
     const ds = ui.logDate || iso(today()), d = P(ds), isToday = ds === iso(today());
-    const r = logText(ds), ed = (S.logEdit || {})[ds];
-    const edited = typeof ed === 'string';
+    const r = logText(ds), m = mergedLog(ds), edited = m.edited;
     return '<div class="sec-head"><div><h2>근무일지</h2><div class="sub">' + (isToday ? '오늘' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일') +
       ' 진행·완료한 업무 ' + r.count + '건이 자동으로 모여요 · 오른쪽 \'복사\'로 복사해요<br>업무명만 담기는 업무는 진행을 시작한 날부터 완료한 날까지 매일, 세부 업무는 체크한 날 바로 들어가요</div></div>' +
       '<div class="nav"><button data-act="logPrev">‹</button><span class="lbl">' + (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')</span>' +
       '<button data-act="logNext">›</button><button data-act="logToday">오늘</button>' +
-      '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="켜면 세부 업무가 있는 업무는 업무명 대신 체크한 세부 업무가 쉼표로 이어져 담겨요">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
+      '<button class="chip ' + (S.logSubs !== false ? 'on' : '') + '" data-act="logSubs" title="끄면 모든 업무를 업무명만으로 담아요 (켜면 업무마다 정한 방식대로)">세부 업무 포함 ' + (S.logSubs !== false ? 'ON' : 'OFF') + '</button>' +
       '<button class="btn primary" data-act="logCopy">복사</button></div></div>' +
-      '<textarea id="logText" class="logbox' + (edited ? ' edited' : '') + '" spellcheck="false" data-inp="logEdit" data-chg="logEditDone" data-ds="' + ds + '" placeholder="이 날 담긴 업무가 없어요 · 직접 적어도 돼요">' + esc(edited ? ed : r.text) + '</textarea>' +
-      (edited ? '<div class="log-edit-bar">✎ 직접 고친 내용이에요. 이후 체크·완료한 업무는 자동으로 더해지지 않아요.<button class="btn" data-act="logReset" data-ds="' + ds + '">자동 내용으로 되돌리기</button></div>'
+      '<textarea id="logText" class="logbox' + (edited ? ' edited' : '') + '" spellcheck="false" data-inp="logEdit" data-chg="logEditDone" data-ds="' + ds + '" placeholder="이 날 담긴 업무가 없어요 · 직접 적어도 돼요">' + esc(m.text) + '</textarea>' +
+      (edited ? '<div class="log-edit-bar">✎ 직접 고친 내용이에요. 이후 체크·완료한 업무는 아래에 자동으로 더해지고, 체크를 풀면 빠져요.<button class="btn" data-act="logReset" data-ds="' + ds + '">자동 내용으로 되돌리기</button></div>'
         : '<div class="sub" style="margin-top:8px">칸 안의 내용을 직접 고칠 수 있어요. 고치면 이 날짜에만 저장돼요.</div>') +
       (r.count || edited ? '' : '<div class="sub" style="margin-top:8px">이 날 진행하거나 완료한 업무가 없어요. 전체 조회에서 \'진행\'을 누르면 그날부터 여기에 담겨요.</div>');
   }
