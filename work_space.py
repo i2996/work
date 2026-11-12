@@ -2107,7 +2107,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<button type="button" class="btn addsub" data-act="subAdd">＋ 세부 업무 추가</button>' +
       '<label>근무일지에 담는 방식 (세부 업무가 있을 때)</label><div class="seg" id="fLogMode">' +
         [['both', '업무명 + 세부 업무'], ['subs', '세부 업무만'], ['title', '업무명만']].map(([v, n]) => '<button type="button" class="' + (t.logMode === v ? 'on' : '') + '" data-act="fLogMode" data-v="' + v + '">' + n + '</button>').join('') + '</div>' +
-      '<div class="hint" style="margin-top:-2px">업무명 + 세부 업무: \'a 회사 고용 단기 파일 작성 및 신고\' · 같은 날 같은 세부 업무를 체크한 업무끼리는 \'a 회사 및 b 회사 고용 …\'처럼 한 줄로 합쳐요.<br>항목 옆 \'일지\'를 끄면 그 항목은 근무일지에서 빼요.</div>' +
       '<label>참고 메모 (선택) · 적어 두면 업무 이름 옆에 메모 아이콘이 생겨요</label><textarea id="fMemo" class="memo-edit" style="min-height:90px" spellcheck="false" placeholder="이 업무를 할 때 참고할 내용 (경로, 담당자, 주의할 점 등)">' + esc(memoSrc === 'occ' ? occMemo(thisMonthKey(t.id)) : (t.memo || '')) + '</textarea>' +
       '<label class="chkline" id="fMemoOccRow"><input id="fMemoOcc" type="checkbox"' + (memoSrc === 'occ' ? ' checked' : '') + '>이번 달(' + (today().getMonth() + 1) + '월)만 (체크하지 않으면 모든 달에 보여요)</label>' +
       '<div class="hint">세부 업무는 요약·전체 조회·미니창·날짜 창에서 업무 옆 ☑ 표시를 누르면 펼쳐져 체크할 수 있어요.<br>세부 업무를 모두 체크하면 업무도 자동으로 완료돼요.<br>근무일지에는 체크한 날 바로 담기고, 업무명은 적히지 않아요.</div></div></div>' +
