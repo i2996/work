@@ -3032,7 +3032,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const tdy = iso(today());
     const keys = new Set(Object.keys(S.prog));
     Object.keys(S.subdone || {}).forEach(k => keys.add(k.slice(0, k.lastIndexOf(':'))));
-    const items = [];
+    const items = [];   // 근무일지에는 시간 없이 업무명만 (o.title 은 화면용으로 시간이 앞에 붙어 있음)
     for (const k of keys) {
       const o = L.occByKey(k); if (!o) continue;
       const p = S.prog[k] || {};
@@ -3042,14 +3042,14 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         // 세부 업무를 담는 업무: 체크한 날 바로 ('일지'를 끈 항목은 빼요)
         const checked = subs.filter(sb => L.subDone(k, sb.id));
         const picked = checked.filter(sb => !sb.nolog && L.subDoneDate(o, sb.id) === ds).map(sb => sb.text);
-        if (picked.length) { const joined = compactSubs(picked); items.push(mode === 'both' ? { o, title: o.title, subs: joined } : { o, line: joined }); }
-        else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
+        if (picked.length) { const joined = compactSubs(picked); items.push(mode === 'both' ? { o, title: o.task.title, subs: joined } : { o, line: joined }); }
+        else if (p.s === 'done' && p.done_at === ds && !checked.length) items.push({ o, line: o.task.title });   // 체크한 항목이 하나도 없이 완료하면 업무명
         continue;
       }
       if (p.s !== 'doing' && p.s !== 'done') continue;
       // 업무명만 담기는 업무: 진행을 시작한 날부터 완료한 날까지(아직 진행 중이면 오늘까지) 매일
       const from = p.at || p.done_at || '', to = p.s === 'done' ? (p.done_at || from) : tdy;
-      if (from && ds >= from && ds <= to) items.push({ o, line: o.title });
+      if (from && ds >= from && ds <= to) items.push({ o, line: o.task.title });
     }
     items.sort((a, b) => L.byEnd(a.o, b.o));
     // 같은 세부 업무 묶음은 업무명을 이어서 한 줄로
