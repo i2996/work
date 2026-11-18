@@ -1659,6 +1659,12 @@ const WSLogic = (function () {
     s.settle = s.settle || {};
     if (!Array.isArray(s.settle.deadlines)) s.settle.deadlines = [];
     if (s.settle.rule && !s.settle.deadlines.length) s.settle.deadlines.push({ id: s.next_id++, name: DEFAULT_DL, rule: s.settle.rule });   // 예전 단일 규칙 → '마감'
+    // 예전 방식({제출기한}처럼 마감 이름이 들어간 항목) → {마감기한} 등으로 바꿈 (날짜는 안내문 화면에서 고른 마감 종류)
+    for (const n of s.notices || []) for (const d of s.settle.deadlines) {
+      if (!d.name || d.name === DEFAULT_DL) continue;
+      n.body = renameDeadlineTokens(n.body, d.name, DEFAULT_DL);
+      if (n.html != null) n.html = renameDeadlineTokens(n.html, d.name, DEFAULT_DL);
+    }
     const legacyMan = s.settle.manual && !Array.isArray(s.settle.manual) ? s.settle.manual : null;
     s.settle.manual = Array.isArray(s.settle.manual) ? s.settle.manual : [];
     if (legacyMan && legacyMan.date && s.settle.deadlines.length) s.settle.manual.push({ did: s.settle.deadlines[0].id, y: legacyMan.y, m: legacyMan.m, date: legacyMan.date });
@@ -1795,13 +1801,7 @@ const WSLogic = (function () {
     if (!name) return '마감 기한 이름을 입력해 주세요. (예: 마감, 제출, 확인)';
     if (name.length > 12) return '이름은 12글자 이내로 써 주세요.';
     if (/[\s{}]/.test(name)) return '이름에는 공백이나 { } 를 쓸 수 없어요.';
-    const mine = deadlineTokenNames(name), reserved = new Set(TOKEN_DEFS.map(d => d[0]).concat([COMPANY_TOKEN, TASK_TOKEN, TIME_TOKEN], AMOUNT_TOKENS));
-    for (const t of mine) if (reserved.has(t)) return '"{' + t + '}" 항목이 정산 대상 항목과 겹쳐요. 다른 이름을 써 주세요.';
-    for (const o of list || []) {
-      if (o.id === selfId) continue;
-      if (o.name === name) return '같은 이름의 마감 기한이 이미 있어요.';
-      for (const t of deadlineTokenNames(o.name)) if (mine.includes(t)) return '"{' + t + '}" 항목이 다른 마감 기한("' + o.name + '")과 겹쳐요.';
-    }
+    for (const o of list || []) if (o.id !== selfId && o.name === name) return '같은 이름의 마감 기한이 이미 있어요.';
     return '';
   }
   /* 이름을 바꿀 때 이미 등록한 안내문의 항목도 같이 바꿔 줌 */
@@ -1817,7 +1817,7 @@ const WSLogic = (function () {
   function fillNotice(body, v) {
     const smap = {}; TOKEN_DEFS.forEach(([n, g, fn]) => { smap[n] = fn; });
     const dl = v.deadlines || (v.deadline !== undefined ? { [DEFAULT_DL]: v.deadline } : {});
-    const known = new Set(Object.keys(dl)); known.add(DEFAULT_DL);
+    const known = new Set([DEFAULT_DL]);   // 마감 항목은 {마감기한} {마감월일} 등만 (안내문 화면에서 고른 마감 종류의 날짜)
     const segs = [], unknown = [], missing = [], undefinedDeadlines = [];
     let missingCompany = false, missingTask = false, missingTime = false;
     const amounts = v.amounts || {}, missingAmounts = [];
@@ -1847,9 +1847,7 @@ const WSLogic = (function () {
       if (m.index > last) segs.push({ t: 'text', v: body.slice(last, m.index) });
       const name = m[1].trim(), def = resolve(name);
       if (!def) {
-        const sf = DL_SUFFIX.find(([sfx]) => name.length > sfx.length && name.endsWith(sfx));
-        if (sf) { const pre = name.slice(0, -sf[0].length); segs.push({ t: 'tok', v: m[0], k: 'u', name }); if (!undefinedDeadlines.includes(pre)) undefinedDeadlines.push(pre); }
-        else { segs.push({ t: 'tok', v: m[0], k: 'u', name }); unknown.push(m[0]); }
+        segs.push({ t: 'tok', v: m[0], k: 'u', name }); unknown.push(m[0]);
       } else if (def.g === 'c') {
         if (company) segs.push({ t: 'tok', v: company, k: 'c', name });
         else { segs.push({ t: 'tok', v: m[0], k: 'x', name }); missingCompany = true; }
@@ -2402,8 +2400,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     dlSave(el) {
       const { r, f, read, g } = dlForm; read();
       const id = Number(el.dataset.id), name = (f.name || '').trim();
-      const xHit = L.deadlineTokenNames(name).find(t => (S.settle.xItems || []).some(x => x.name === t));
-      const e = L.validateDeadlineName(name, S.settle.deadlines, id) || (xHit ? '"{' + xHit + '}" 항목이 엑셀 금액 항목과 겹쳐요. 다른 이름을 써 주세요.' : '') || L.ruleValid(r);
+      const e = L.validateDeadlineName(name, S.settle.deadlines, id) || L.ruleValid(r);
       if (e) { g('rErr').textContent = e; return; }
       const out = { type: r.type };
       if (r.type === 'fixed') { out.monthOffset = parseInt(r.monthOffset, 10); out.day = r.day === 'last' ? 'last' : parseInt(r.day, 10); out.adjust = r.adjust || 'none'; }
@@ -2412,7 +2409,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       else out.n = parseInt(r.n, 10);
       if (id) {
         const d = S.settle.deadlines.find(x => x.id === id);
-        if (d) { if (d.name !== name) S.notices.forEach(nn => { nn.body = L.renameDeadlineTokens(nn.body, d.name, name); if (nn.html != null) nn.html = L.renameDeadlineTokens(nn.html, d.name, name); }); d.name = name; d.rule = out; }
+        if (d) { d.name = name; d.rule = out; }
       } else S.settle.deadlines.push({ id: S.next_id++, name, rule: out });
       closeModal(); commit();
     },
@@ -3243,7 +3240,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!c.period.ok) b.push('정산 대상 기간 검증에 실패했어요.');
     if (c.deadlines.some(d => d.date && !d.ok)) b.push('마감 기한의 날짜·요일 검증에 실패했어요.');
     if (f.missing.length) b.push('마감 기한 항목(' + f.missing.join(', ') + ')의 날짜가 아직 없어요. 마감 기한을 추가하고 규칙을 설정해 주세요.');
-    if (f.undefinedDeadlines.length) b.push('아직 만들지 않은 마감 기한이에요: ' + f.undefinedDeadlines.map(n => '"' + n + '"').join(', ') + ' · 마감 기한을 추가해 주세요.');
     if (f.missingCompany) b.push('이 안내문에는 {회사명} 항목이 있어요. 위의 회사명 칸에 회사 이름을 입력해 주세요.');
     if (f.missingTask) b.push('이 안내문에는 {업무명} 항목이 있어요. 위의 업무명 칸에 업무 이름을 입력해 주세요.');
     if (f.missingExcel.length) b.push('엑셀에서 읽는 항목(' + f.missingExcel.map(n => '{' + n + '}').join(', ') + ')의 값이 없어요. 위의 \'엑셀 파일에서 읽기\'로 이번 달 파일을 골라 주세요.');
@@ -3336,7 +3332,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         (d.date ? '<div class="fm-chk ' + (d.ok ? 'ok' : 'bad') + '">' + (d.ok ? '✓ 날짜·요일 검증 완료' : '⚠ 날짜·요일이 맞지 않아요') + '</div>' : '') +
         '<div class="fm-rule">규칙: ' + esc(L.describeRule(d.rule) || '없음') + '</div>' +
         (diff ? '<div class="fm-diff">※ 정산 대상 월(' + c.m + '월)과 마감 기한의 월(' + (d.date.getMonth() + 1) + '월)은 달라요</div>' : '') +
-        '<div class="fm-items">안내문 항목: ' + L.deadlineTokenNames(d.name).map(n => '{' + n + '}').join(' ') + '</div>' +
         '<div class="fm-acts"><button class="btn" data-act="ruleEdit" data-id="' + d.id + '">규칙 변경</button><button class="btn" data-act="manualSet" data-id="' + d.id + '">이번만 직접 지정</button>' +
         (d.source === 'manual' ? '<button class="btn" data-act="manualClear" data-id="' + d.id + '">직접 지정 해제</button>' : '') +
         '<button class="btn danger" data-act="dlDel" data-id="' + d.id + '">삭제</button></div></div></div>';
@@ -3483,7 +3478,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return o;
     }).filter(x => x.name || x.sheet || x.cell || x.col);
     const reserved = new Set(L.TOKEN_DEFS.map(d => d[0]).concat([L.COMPANY_TOKEN, L.TASK_TOKEN, L.TIME_TOKEN], L.AMOUNT_TOKENS));
-    (S.settle.deadlines || []).forEach(d => L.deadlineTokenNames(d.name).forEach(t => reserved.add(t)));
+    L.deadlineTokenNames(L.DEFAULT_DL).forEach(t => reserved.add(t));
     const seen = new Set();
     for (const x of items) {
       if (!x.name) return err('항목 이름을 입력해 주세요.');
@@ -3526,7 +3521,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     rtRange = null;
     const n = id ? S.notices.find(x => x.id === id) : null;
     const chips = (names, g) => names.map(nm => '<button type="button" class="chip tkb tkb-' + g + '" data-act="tokIns" data-t="' + esc(nm) + '">{' + esc(nm) + '}</button>').join('');
-    const dlNames = (S.settle.deadlines || []).map(d => d.name); if (!dlNames.length) dlNames.push(L.DEFAULT_DL);
     const M = openModal(() => '<h3>' + (n ? '안내문 양식 수정' : '안내문 양식 등록') + '</h3><div class="form">' +
       '<label>양식 이름</label><input id="nName" value="' + esc(n ? n.name : '') + '" placeholder="예: 월 정산 자료 제출 안내">' +
       '<label>안내문 내용 (메일 등에서 복사해 붙여 넣으면 굵게·형광펜 같은 서식도 그대로 남아요)</label>' +
@@ -3540,9 +3534,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="tkrow"><span class="tkl h">시간</span>' + chips([L.TIME_TOKEN], 'h') + '</div>' +
       '<div class="tkrow"><span class="tkl a">금액</span>' + chips(L.AMOUNT_TOKENS, 'a') + '</div>' +
       ((S.settle.xItems || []).length ? '<div class="tkrow"><span class="tkl e">엑셀</span>' + chips(S.settle.xItems.map(x => x.name), 'e') + '</div>' : '') +
-      '<div class="tkrow"><span class="tkl d">고른 마감 종류</span>' + chips(L.deadlineTokenNames(L.DEFAULT_DL), 'd') + '</div>' +
-      dlNames.filter(nm => nm !== L.DEFAULT_DL).map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
-      '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
+      '<div class="tkrow"><span class="tkl d">마감</span>' + chips(L.deadlineTokenNames(L.DEFAULT_DL), 'd') + '</div></div>' +
+      '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 날짜는 안내문 화면의 \'마감 종류\'에서 고른 마감 기한으로 들어가요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
     M.el.style.width = 'min(720px,100%)';
     const check = () => {
@@ -3550,7 +3543,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       const f = L.fillNotice(ed.innerText, calcSettle().vars), msg = [];
       if (fillHtml(ed.innerHTML, calcSettle().vars, false).toks !== tokCount(f)) msg.push('서식이 {항목} 글자 중간에 걸려 있어요. 그 항목을 지우고 항목 버튼으로 다시 넣어 주세요');
       if (f.unknown.length) msg.push('알 수 없는 항목: ' + f.unknown.join(', ') + ' (아래 항목 버튼에서 골라 넣어 주세요)');
-      if (f.undefinedDeadlines.length) msg.push('아직 만들지 않은 마감 기한: ' + f.undefinedDeadlines.join(', ') + ' (저장한 뒤 "마감 기한 추가"로 만들어 주세요)');
       const e = M.el.querySelector('#nErr'); e.style.color = msg.length ? 'var(--pink-ink)' : ''; e.textContent = msg.join(' / ');
     };
     const ed = M.el.querySelector('#nBody');
@@ -3586,9 +3578,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const f = { name: cur ? cur.name : (S.settle.deadlines.length ? '' : L.DEFAULT_DL) };
     const v = x => (x == null ? '' : x);
     const M = openModal(() => '<h3>' + (cur ? '마감 기한 수정' : '마감 기한 추가') + '</h3>' +
-      '<p class="hint2">마감 기한마다 이름과 계산 규칙을 따로 정해요. 예) 이름 "제출" = 다음 달 10일, 이름 "확인" = 다음 달 말일로부터 3영업일 전. 한 번 정해 두면 월마다 자동으로 계산하고, 언제든 바꿀 수 있어요.</p>' +
+      '<p class="hint2">마감 기한마다 이름과 계산 규칙을 따로 정해요. 예) 이름 "제출" = 다음 달 10일, 이름 "확인" = 다음 달 말일로부터 3영업일 전. 한 번 정해 두면 월마다 자동으로 계산하고, 안내문 화면의 \'마감 종류\'에서 골라 {마감기한} 등에 써요.</p>' +
       '<div class="form"><label>마감 기한 이름</label><input id="dName" value="' + esc(f.name) + '" placeholder="예: 제출, 확인, 마감">' +
-      '<div class="fm-items" id="dTok"></div>' +
       '<label>규칙 종류</label><select id="rType">' + Object.entries(L.RULE_TYPES).map(([k, n]) => '<option value="' + k + '"' + (r.type === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select><div id="rFields"></div></div>' +
       '<div class="rex" id="rEx"></div><div class="err" id="rErr"></div><div class="modal-actions">' + (cur ? '<button class="btn danger" data-act="dlDel" data-id="' + cur.id + '" style="margin-right:auto">삭제</button>' : '') +
       '<button class="btn primary" data-act="dlSave" data-id="' + (cur ? cur.id : 0) + '">저장</button></div>');
@@ -3614,7 +3605,6 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     };
     const update = () => {
       const ex = g('rEx'), e = L.ruleValid(r), nm = (f.name || '').trim();
-      g('dTok').textContent = nm ? '안내문 항목: ' + L.deadlineTokenNames(nm).map(x => '{' + x + '}').join(' ') : '';
       if (e) { ex.innerHTML = '<span class="muted">값을 모두 입력하면 ' + c.y + '년 ' + c.m + '월분 예시가 여기에 보여요</span>'; return; }
       const d = L.calcDeadline(r, c.y, c.m);
       ex.innerHTML = '예) 정산 대상 <b>' + c.y + '년 ' + c.m + '월분</b> → ' + (nm ? '<b>' + esc(nm) + '</b> ' : '') + '마감 기한 <b>' + L.fmtFull(d) + '</b>';
