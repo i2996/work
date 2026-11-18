@@ -1272,6 +1272,8 @@ mark.tk-u{background:#eee;color:#666;outline:1px dashed #999}
 
 /* 회사명 */
 .fm-co{min-width:260px;flex:1;max-width:380px;padding:8px 11px;font-size:14px;font-weight:600}
+.fm-dlpick{min-width:260px;max-width:380px;flex:1;padding:8px 10px;font-size:14px;font-weight:600;background:#fff;border-radius:10px}
+.tag.used{background:#e0903a;color:#fff}
 /* 회사명·업무명 드롭다운: 입력한 내용과 상관없이 저장된 목록을 모두 보여주고, 누르면 바로 적용 */
 .combo{position:relative;display:flex;flex:1;min-width:260px;max-width:380px}
 .combo .fm-co{max-width:none;min-width:0;width:100%;padding-right:38px}
@@ -2394,6 +2396,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
     dlAdd() { openDeadline(0); },
+    dlPick(el) { S.settle.dlPick = Number(el.value); commit(); },
     dlToggle(el) { const id = Number(el.dataset.id); if (ui.dlOpen.has(id)) ui.dlOpen.delete(id); else ui.dlOpen.add(id); renderPanel(); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
     dlSave(el) {
@@ -3227,7 +3230,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       return { id: dl.id, name: dl.name, rule: dl.rule, date, source, ok: date ? L.checkDate(date) : null };
     });
     const map = {}; deadlines.forEach(d => { map[d.name] = d.date; });
-    return { y, m, period, deadlines, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amt: amountsOf(y, m),
+    // 마감 종류 선택: {마감기한} {마감월일} 등 '마감' 항목은 고른 마감 기한의 날짜로 (기본: '마감' 이름 → 첫 번째)
+    const picked = deadlines.find(d => d.id === st.dlPick) || deadlines.find(d => d.name === L.DEFAULT_DL) || deadlines[0] || null;
+    if (picked) map[L.DEFAULT_DL] = picked.date;
+    return { y, m, period, deadlines, picked, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amt: amountsOf(y, m),
       vars: { y, m, start: period.start, end: period.end, deadlines: map, company: (st.company || '').trim(), task: (st.taskName || '').trim(), time: (st.dueTime || '').trim(), amounts: amountsOf(y, m).text,
         xnames: (st.xItems || []).map(x => x.name), xvals: ((st.xVals || {})[amtKey(y, m)] || {}).vals || {} } };
   }
@@ -3283,7 +3289,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="fm-sel"><span class="fm-lab">업무명</span>' + combo('tw', 'stTaskName', c.task, S.taskNames, '안내문의 {업무명} 자리에 들어가요', 'twChange', 'twInput') +
       '<span class="fm-hint">한 번 입력하면 기억해요 · 칸을 누르면 저장된 업무가 모두 보이고, 고르면 바로 바뀌어요</span></div>' +
       '<div class="fm-sel"><span class="fm-lab">마감 시간</span>' + combo('tm', 'stDueTime', c.time, S.dueTimes, '안내문의 {마감시간} 자리에 들어가요 (예: 오후 3시)', 'tmChange', 'tmInput') +
-      '<span class="fm-hint">매번 달라지는 시간은 여기서 골라요 · 쓰는 그대로 들어가요 (예: 15:00, 오후 3시, 18시까지)</span></div>';
+      '<span class="fm-hint">매번 달라지는 시간은 여기서 골라요 · 쓰는 그대로 들어가요 (예: 15:00, 오후 3시, 18시까지)</span></div>' +
+      (c.deadlines.length ? '<div class="fm-sel"><span class="fm-lab">마감 종류</span><select class="fm-dlpick" data-chg="dlPick">' +
+        c.deadlines.map(d => '<option value="' + d.id + '"' + (c.picked && c.picked.id === d.id ? ' selected' : '') + '>' + esc(d.name) + (d.date ? ' · ' + L.fmtFull(d.date) : ' · 날짜 없음') + '</option>').join('') + '</select>' +
+        '<span class="fm-hint">안내문의 {마감기한} {마감월일} {마감요일} 등은 여기서 고른 마감 날짜로 바뀌어요</span></div>' : '');
     const a = c.amt, ain = (f, cls, val, ph) => '<input class="' + cls + '" inputmode="numeric" data-f="' + f + '" data-inp="amInput" data-chg="amChange" value="' + esc(comma(val)) + '" placeholder="' + esc(ph) + '"' + ' id="' + ({ cnt: 'amCnt', supply: 'amSupply', tax: 'amTax' })[f] + '"' + ' autocomplete="off">';
     h += '<div class="fm-sel"><span class="fm-lab">정산 금액</span><span class="fm-amt">' +
       '<small>건수</small>' + ain('cnt', 'cnt', a.cnt, '0') +
@@ -3321,7 +3330,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       h += '<div class="fm-dl' + (open ? ' open' : '') + '"><button type="button" class="fm-dlsum" data-act="dlToggle" data-id="' + d.id + '" title="' + (open ? '접기' : '눌러서 규칙·항목·버튼 보기') + '">' +
         '<b>' + esc(d.name) + '</b><span class="dt' + (d.date ? '' : ' muted') + '">' + (d.date ? L.fmtFull(d.date) : '규칙을 확인해 주세요') + '</span>' +
         (d.date ? (d.ok ? '<span class="ok">✓ 검증</span>' : '<span class="bad">⚠ 확인 필요</span>') : '') +
-        (d.source === 'manual' ? '<span class="tag adj">직접 지정</span>' : '') + '<span class="arr">▶</span></button>';
+        (d.source === 'manual' ? '<span class="tag adj">직접 지정</span>' : '') + (c.picked && c.picked.id === d.id && c.deadlines.length > 1 ? '<span class="tag used" title="안내문의 {마감…} 항목에 쓰는 마감">안내문에 사용</span>' : '') + '<span class="arr">▶</span></button>';
       if (!open) { h += '</div>'; continue; }
       h += '<div class="fm-dlbody"><div class="fm-dlh"><span class="fm-bm">' + src + '</span></div>' +
         (d.date ? '<div class="fm-chk ' + (d.ok ? 'ok' : 'bad') + '">' + (d.ok ? '✓ 날짜·요일 검증 완료' : '⚠ 날짜·요일이 맞지 않아요') + '</div>' : '') +
@@ -3531,7 +3540,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<div class="tkrow"><span class="tkl h">시간</span>' + chips([L.TIME_TOKEN], 'h') + '</div>' +
       '<div class="tkrow"><span class="tkl a">금액</span>' + chips(L.AMOUNT_TOKENS, 'a') + '</div>' +
       ((S.settle.xItems || []).length ? '<div class="tkrow"><span class="tkl e">엑셀</span>' + chips(S.settle.xItems.map(x => x.name), 'e') + '</div>' : '') +
-      dlNames.map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
+      '<div class="tkrow"><span class="tkl d">고른 마감 종류</span>' + chips(L.deadlineTokenNames(L.DEFAULT_DL), 'd') + '</div>' +
+      dlNames.filter(nm => nm !== L.DEFAULT_DL).map(nm => '<div class="tkrow"><span class="tkl d">마감 · ' + esc(nm) + '</span>' + chips(L.deadlineTokenNames(nm), 'd') + '</div>').join('') + '</div>' +
       '<div class="hint">문구는 그대로 두고 {정산대상기간}, {마감기한} 같은 항목만 선택한 날짜로 바뀌어요. 마감 기한이 여러 개면 기한마다 이름이 달라서 항목도 따로 있어요. 기존 안내문을 붙여 넣은 뒤 날짜 부분만 항목으로 바꿔 주세요.</div></div>' +
       '<div class="err" id="nErr"></div><div class="modal-actions"><button class="btn primary" data-act="noticeSave" data-id="' + (n ? n.id : 0) + '">저장</button></div>');
     M.el.style.width = 'min(720px,100%)';
