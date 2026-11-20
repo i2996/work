@@ -2847,7 +2847,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const doing = pick(L.doingList());
     const soon = pick(L.occRange(t, addDays(t, 6), { noTodos: true })
       .filter(o => stOf(o.key) === 'todo' && diffDays(o.end, t) >= 0 && diffDays(o.end, t) < 7).sort(L.byEnd));
-    return { late, doing, soon, count: late.length + doing.length + soon.length };
+    // 진행 가능: 시작일이 지났고(오늘 포함) 아직 진행하지 않았으며 마감이 7일 넘게 남은 업무
+    const ready = pick(L.occRange(t, t, { noTodos: true }).filter(o => stOf(o.key) === 'todo' && o.start <= t).sort(L.byEnd));
+    return { late, doing, soon, ready, count: late.length + doing.length + soon.length + ready.length };
   }
   function sumRow(o) {
     const st = stOf(o.key), k = ' data-key="' + o.key + '"';
@@ -2856,6 +2858,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
         '<button class="undo" data-act="reset"' + k + ' title="시작을 취소하고 시작 전으로 되돌려요">취소</button>'
       : ppBtn(o) + stateCell(o);
     return '<div class="rw prog ' + (L.pinkOf(o) ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="c-t">' + esc(o.title) + memoIcon(o) + subTag(o) + '</div><div class="c-p">' + periodText(o) +
+      (stOf(o.key) === 'todo' && iso(o.start) === iso(today()) && iso(o.start) !== iso(o.end) ? '<span class="tag adj">오늘 시작</span>' : '') +
       '</div><div class="c-m">' + dueCell(o) + dTag(o) + '</div><div class="c-a">' + acts + '</div></div>' + subList(o, 'rw-subs');
   }
   /* 마감까지 3~6일 남은 업무에도 D-n 표시 (0~2일은 dueCell 이 이미 표시) */
@@ -2865,16 +2868,17 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   }
   function viewSum() {
     const g = summaryGroups();
-    let h = '<div class="sec-head"><div><h2>요약</h2><div class="sub">지연 ' + g.late.length + ' · 진행 ' + g.doing.length + ' · 마감 7일 미만 ' + g.soon.length +
+    let h = '<div class="sec-head"><div><h2>요약</h2><div class="sub">지연 ' + g.late.length + ' · 진행 ' + g.doing.length + ' · 마감 7일 미만 ' + g.soon.length + ' · 진행 가능 ' + g.ready.length +
       ' · 한 업무는 위쪽 묶음에 한 번만 보여요</div></div></div>';
-    if (!g.count) return h + '<div class="empty"><div><b>지금 챙길 업무가 없어요</b>지연·진행 중이거나 마감이 7일 안에 다가온 업무가 여기에 모여요</div></div>';
+    if (!g.count) return h + '<div class="empty"><div><b>지금 챙길 업무가 없어요</b>지연·진행 중이거나, 마감이 7일 안에 다가왔거나, 시작일이 된 업무가 여기에 모여요</div></div>';
     const sec = (title, cls, list, desc) => list.length
       ? '<div class="grp-t ' + cls + '">' + title + ' ' + list.length + '건<span style="font-weight:500;margin-left:6px">' + desc + '</span></div>' +
         '<div class="table" style="margin-bottom:6px"><div class="rw head prog"><div>업무</div><div>기간</div><div>마감</div><div></div></div>' + list.map(sumRow).join('') + '</div>'
       : '';
     return h + sec('지연', 'late', g.late, '마감이 지났는데 완료하지 않은 업무 (최근 7일)') +
       sec('진행', '', g.doing, '지금 하고 있는 업무') +
-      sec('마감 7일 미만', '', g.soon, '아직 시작하지 않았고 마감이 7일 안에 다가온 업무');
+      sec('마감 7일 미만', '', g.soon, '아직 시작하지 않았고 마감이 7일 안에 다가온 업무') +
+      sec('진행 가능', '', g.ready, '시작일이 됐는데 아직 진행하지 않은 업무');
   }
 
   /* 전체 조회 */
