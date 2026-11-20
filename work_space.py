@@ -2369,7 +2369,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     },
     coChange(el) { S.settle.company = el.value.trim(); rememberCompany(el.value); commitSoon(); },
     coInput(el) { S.settle.company = el.value; persist(); refreshNoticePreview(); },
-    twChange(el) { S.settle.taskName = el.value.trim(); rememberTaskName(el.value); commitSoon(); },
+    twChange(el) { S.settle.taskName = el.value.trim(); rememberTaskName(el.value); applyTaskDl(); commitSoon(); },
     twInput(el) { S.settle.taskName = el.value; persist(); refreshNoticePreview(); },
     amInput(el) { setAmount(el.dataset.f, el.value); persist(); refreshAmounts(); refreshNoticePreview(); },
     amChange(el) { setAmount(el.dataset.f, el.value); commitSoon(); },
@@ -2395,7 +2395,13 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     tmChange(el) { S.settle.dueTime = el.value.trim(); rememberDueTime(el.value); commitSoon(); },
     tmInput(el) { S.settle.dueTime = el.value; persist(); refreshNoticePreview(); },
     dlAdd() { openDeadline(0); },
-    dlPick(el) { S.settle.dlPick = Number(el.value); commit(); },
+    dlPick(el) {
+      S.settle.dlPick = Number(el.value);
+      // 업무명이 있으면 이 업무명에 고른 마감 종류를 기억 → 다음에 업무명만 고르면 자동으로 바뀜
+      const tn = (S.settle.taskName || '').trim();
+      if (tn) S.settle.taskDl = Object.assign({}, S.settle.taskDl, { [tn]: S.settle.dlPick });
+      commit();
+    },
     dlToggle(el) { const id = Number(el.dataset.id); if (ui.dlOpen.has(id)) ui.dlOpen.delete(id); else ui.dlOpen.add(id); renderPanel(); },
     ruleEdit(el) { openDeadline(Number(el.dataset.id)); },
     dlSave(el) {
@@ -3293,7 +3299,8 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
       '<span class="fm-hint">매번 달라지는 시간은 여기서 골라요 · 쓰는 그대로 들어가요 (예: 15:00, 오후 3시, 18시까지)</span></div>' +
       (c.deadlines.length ? '<div class="fm-sel"><span class="fm-lab">마감 종류</span><select class="fm-dlpick" data-chg="dlPick">' +
         c.deadlines.map(d => '<option value="' + d.id + '"' + (c.picked && c.picked.id === d.id ? ' selected' : '') + '>' + esc(d.name) + (d.date ? ' · ' + L.fmtFull(d.date) : ' · 날짜 없음') + '</option>').join('') + '</select>' +
-        '<span class="fm-hint">안내문의 {마감기한} {마감월일} {마감요일} 등은 여기서 고른 마감 날짜로 바뀌어요</span></div>' : '');
+        '<span class="fm-hint">' + (c.task && (S.settle.taskDl || {})[c.task] === (c.picked && c.picked.id) ? '\'' + esc(c.task) + '\' 업무명에 이 마감을 기억해 뒀어요 · ' : c.task ? '고르면 \'' + esc(c.task) + '\' 업무명에 기억돼요 · ' : '') +
+        '{마감기한} {마감월일} 등은 여기서 고른 마감 날짜로 바뀌어요</span></div>' : '');
     const a = c.amt, ain = (f, cls, val, ph) => '<input class="' + cls + '" inputmode="numeric" data-f="' + f + '" data-inp="amInput" data-chg="amChange" value="' + esc(comma(val)) + '" placeholder="' + esc(ph) + '"' + ' id="' + ({ cnt: 'amCnt', supply: 'amSupply', tax: 'amTax' })[f] + '"' + ' autocomplete="off">';
     h += '<div class="fm-sel"><span class="fm-lab">정산 금액</span><span class="fm-amt">' +
       '<small>건수</small>' + ain('cnt', 'cnt', a.cnt, '0') +
@@ -3369,6 +3376,11 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     v = (v || '').trim(); if (!v) return;
     S.dueTimes = [v].concat((S.dueTimes || []).filter(x => x !== v)).slice(0, 20);
   }
+  /* 업무명에 기억해 둔 마감 종류가 있으면 그걸로 바꿈 (없는 마감이면 무시) */
+  function applyTaskDl() {
+    const tn = (S.settle.taskName || '').trim(), id = (S.settle.taskDl || {})[tn];
+    if (id && (S.settle.deadlines || []).some(d => d.id === id)) S.settle.dlPick = id;
+  }
   function rememberTaskName(name) {
     name = (name || '').trim(); if (!name) return;
     S.taskNames = [name].concat((S.taskNames || []).filter(x => x !== name)).slice(0, 20);
@@ -3383,7 +3395,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   /* 회사명·업무명 드롭다운 (k: 'co' 회사 / 'tw' 업무) */
   const COMBO = {
     co: { list: () => S.companies, set: n => { S.settle.company = n; rememberCompany(n); }, empty: '저장된 회사가 없어요 · 입력하면 여기에 쌓여요' },
-    tw: { list: () => S.taskNames, set: n => { S.settle.taskName = n; rememberTaskName(n); }, empty: '저장된 업무가 없어요 · 입력하면 여기에 쌓여요' },
+    tw: { list: () => S.taskNames, set: n => { S.settle.taskName = n; rememberTaskName(n); applyTaskDl(); }, empty: '저장된 업무가 없어요 · 입력하면 여기에 쌓여요' },
     tm: { list: () => S.dueTimes, set: n => { S.settle.dueTime = n; rememberDueTime(n); }, empty: '저장된 시간이 없어요 · 입력하면 여기에 쌓여요' },
   };
   function combo(k, id, value, list, ph, chg, inp) {
@@ -3402,7 +3414,7 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
   document.addEventListener('mousedown', e => {
     const t = e.target;
     const del = t.closest && t.closest('[data-pickdel]');
-    if (del) { e.preventDefault(); const k = del.dataset.pickdel, l = COMBO[k].list(); l.splice(Number(del.dataset.i), 1); ui.combo = k; commit(); return; }
+    if (del) { e.preventDefault(); const k = del.dataset.pickdel, l = COMBO[k].list(), gone = l.splice(Number(del.dataset.i), 1)[0]; if (k === 'tw' && S.settle.taskDl) delete S.settle.taskDl[gone]; ui.combo = k; commit(); return; }
     const pick = t.closest && t.closest('[data-pick]');
     if (pick) {
       e.preventDefault();
