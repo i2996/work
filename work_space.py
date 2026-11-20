@@ -1005,6 +1005,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .mt-row.pink .t{color:var(--pink-ink)}
 .mt-row.soon{background:#fff7d4;box-shadow:inset 3px 0 0 #f0d56e}
 .mt-row.soon .t{color:#7d6410}
+.mt-row.ready{background:#f6f4fc;box-shadow:inset 3px 0 0 #c9bdf0}
 .mt-row .action{padding:5px 11px;flex:none}
 .mini-todo{flex:1.5 1 0;min-height:90px;padding:0;display:flex;overflow:hidden}
 /* 미니창: 업무 칸과 TO-DO 칸 사이 높이 조절 손잡이 */
@@ -3734,7 +3735,10 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     const soon = L.occRange(addDays(t, 1), addDays(t, 2), { noTodos: true }).filter(soonOf);
     const map = new Map();
     [...late, ...doing, ...dueToday, ...soon].forEach(o => map.set(o.key, o));
-    const rank = o => (L.pinkOf(o) ? 0 : soonOf(o) ? 1 : 2);
+    // 진행 가능: 시작일이 됐는데 아직 진행하지 않은 업무 (목록 맨 아래)
+    const ready = new Set();
+    L.occRange(t, t, { noTodos: true }).filter(o => stOf(o.key) === 'todo' && !map.has(o.key)).forEach(o => { map.set(o.key, o); ready.add(o.key); });
+    const rank = o => (L.pinkOf(o) ? 0 : soonOf(o) ? 1 : ready.has(o.key) ? 3 : 2);
     const list = [...map.values()].sort((a, b) => rank(a) - rank(b) || L.byEnd(a, b));
     const pill = (cls, n, label) => '<div class="pill ' + cls + '"><b>' + n + '</b><span>' + label + '</span></div>';
     $('#miniSummary').innerHTML = '<div class="pills">' + pill('p-pink', dueToday.length, '오늘 마감') + pill('p-soon', soon.length, '마감 임박') +
@@ -3743,8 +3747,9 @@ APP_JS = r'''/* WORK SPACE - 화면 (메인창 / 미니창 공용) */
     if (!list.length) h = '<div class="tempty">지금 처리할 업무가 없어요</div>';
     for (const o of list) {
       const n = diffDays(o.end, t), st = stOf(o.key), pk = L.pinkOf(o);
-      const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
-      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : '') + '"><div class="t">' + esc(o.title) + memoIcon(o) + subTag(o) + '<small>' + sub + '</small></div>' + ppBtn(o) +
+      const rd = ready.has(o.key), ds = 'D-' + n + ' · ' + fmtMD(o.end) + ' 마감';
+      const sub = pk === 'today' ? '오늘 마감' : pk === 'late' ? '지연 D+' + (-n) : rd ? (iso(o.start) === ts ? '오늘 시작' : '진행 가능') + ' · ' + ds : ds;
+      h += '<div class="mt-row ' + (pk ? 'pink' : soonOf(o) ? 'soon' : rd ? 'ready' : '') + '"><div class="t">' + esc(o.title) + memoIcon(o) + subTag(o) + '<small>' + sub + '</small></div>' + ppBtn(o) +
         (st === 'doing' ? '<button class="action finish" data-act="finish" data-key="' + o.key + '">완료</button>'
           : '<button class="action start" data-act="start" data-key="' + o.key + '">진행</button>') + '</div>' + subList(o, 'mt-subs');
     }
