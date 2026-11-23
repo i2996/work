@@ -361,9 +361,7 @@ def xlsx_read_cells(path, items):
                 except Exception:
                     out.append({"err": "'%s' 열 이름이 올바르지 않아요" % col})
                     continue
-                if not nums:
-                    out.append({"err": "%s 시트 %s열 %d행부터 숫자가 없어요" % (sheet, col, start)})
-                    continue
+                # 더할 숫자가 없으면 0 (빈 열)
                 pick = nums if kind == "sum" else [n for n in nums if (abs(n) < 100) == (kind == "small")]
                 out.append({"v": tidy(sum(pick)), "n": len(pick)})
                 continue
